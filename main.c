@@ -40,6 +40,8 @@ static SystemRole_t xMyRole = ROLE_UNDEFINED;
 #define STACK_SIZE_MQTT            ( configMINIMAL_STACK_SIZE * 4 )
 #define STACK_SIZE_CLIENT_HANDLER  ( configMINIMAL_STACK_SIZE * 4 )
 #define MAX_CLIENTS                 5
+#define SHARED_AUTH_TOKEN           "gizli_sifre123"
+
 
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
@@ -398,7 +400,10 @@ static void vNetworkTask( void *pvParameters )
             /* Kendimizi broker'a tanitiyoruz - ilk mesaj olarak rol bilgimizi
             * gonderiyoruz. Broker bu mesaji okuyup bizi subscriber listesine
             * ekleyip eklemeyecegine karar verecek. */
-            const char *kimlikMesaji = ( xRole == ROLE_PUBLISHER ) ? "ROLE:PUBLISHER" : "ROLE:SUBSCRIBER";
+            char kimlikMesaji[ 128 ];
+            const char *rolString = ( xRole == ROLE_PUBLISHER ) ? "PUBLISHER" : "SUBSCRIBER";
+            snprintf( kimlikMesaji, sizeof( kimlikMesaji ), "AUTH:%s|ROLE:%s", SHARED_AUTH_TOKEN, rolString );
+
             send( clientSocket, kimlikMesaji, (int) strlen( kimlikMesaji ), 0 );
             printf( "[Network] Kimlik bildirildi: %s\n", kimlikMesaji );
 
@@ -440,7 +445,7 @@ static void vNetworkTask( void *pvParameters )
 
                 vTaskDelay( pdMS_TO_TICKS( 100 ) );
             }
-}
+        }
     }
 }
 
@@ -470,12 +475,42 @@ static void vClientHandlerTask( void *pvParameters )
         {
             recvBuffer[ bytesReceived ] = '\0';
 
-            if( strcmp( recvBuffer, "ROLE:SUBSCRIBER" ) == 0 )
+            /* Mesaji "AUTH:token|ROLE:rol" formatinda ayristiriyoruz.
+            * strtok, verilen ayraca (burada "|") gore string'i parcalara boler. */
+            char bufferKopyasi[ 256 ];
+            strncpy( bufferKopyasi, recvBuffer, sizeof( bufferKopyasi ) - 1 );
+            bufferKopyasi[ sizeof( bufferKopyasi ) - 1 ] = '\0';
+
+            char *authKismi = strtok( bufferKopyasi, "|" );  /* "AUTH:gizli_sifre123" */
+            char *roleKismi = strtok( NULL, "|" );             /* "ROLE:PUBLISHER" */
+
+            bool bAuthBasarili = false;
+
+            if( authKismi != NULL && strncmp( authKismi, "AUTH:", 5 ) == 0 )
+            {
+                const char *gelenToken = authKismi + 5;  /* "AUTH:" kismini atla */
+
+                if( strcmp( gelenToken, SHARED_AUTH_TOKEN ) == 0 )
+                {
+                    bAuthBasarili = true;
+                }
+            }
+
+            if( !bAuthBasarili )
+            {
+                printf( "[ClientHandler] YETKISIZ BAGLANTI! Token dogrulanamadi, baglanti reddediliyor.\n" );
+                closesocket( clientSocket );
+                vTaskDelete( NULL );
+            }
+
+            printf( "[ClientHandler] Authentication basarili.\n" );
+
+            /* Simdi rol kismini isliyoruz */
+            if( roleKismi != NULL && strcmp( roleKismi, "ROLE:SUBSCRIBER" ) == 0 )
             {
                 bIsSubscriber = true;
                 printf( "[ClientHandler] Bu client bir SUBSCRIBER.\n" );
 
-                /* Subscriber listesine ekle - MUTEX ile koru */
                 xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
                 if( xSubscriberCount < MAX_CLIENTS )
                 {
@@ -484,12 +519,12 @@ static void vClientHandlerTask( void *pvParameters )
                 }
                 xSemaphoreGive( xSubscriberListMutex );
             }
-            else if( strcmp( recvBuffer, "ROLE:PUBLISHER" ) == 0 )
+            else if( roleKismi != NULL && strcmp( roleKismi, "ROLE:PUBLISHER" ) == 0 )
             {
                 printf( "[ClientHandler] Bu client bir PUBLISHER.\n" );
             }
 
-            break;  /* kimlik mesaji geldi, donguden cik */
+            break;
         }
 
         kimlikBekleSayaci++;
@@ -504,12 +539,22 @@ static void vClientHandlerTask( void *pvParameters )
         if( bytesReceived > 0 )
         {
             recvBuffer[ bytesReceived ] = '\0';
-            printf( "[ClientHandler] Veri alindi: %s\n", recvBuffer );
 
-            /* Eger bu bir SUBSCRIBER degilse (yani publisher ise),
-             * gelen veriyi TUM subscriber'lara ilet (broadcast). */
-            if( !bIsSubscriber )
+            /* --- AUTHORIZATION KONTROLU ---
+            * Bu client SUBSCRIBER olarak kayitliysa, veri GONDERMEYE
+            * yetkisi yok - sadece dinleyebilir. Eger yine de veri
+            * gonderirse, bunu bir yetki ihlali olarak logluyoruz ve
+            * veriyi ISLEMEDEN reddediyoruz. */
+            if( bIsSubscriber )
             {
+                printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
+                        "calisti, veri reddediliyor. Gelen: %s\n", recvBuffer );
+            }
+            else
+            {
+                /* Bu bir PUBLISHER - veri gonderme yetkisi var, isle. */
+                printf( "[ClientHandler] Veri alindi: %s\n", recvBuffer );
+
                 xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
                 for( int i = 0; i < xSubscriberCount; i++ )
                 {
@@ -556,6 +601,7 @@ static void vMqttSubscriberTask( void *pvParameters )
         printf( "[MqttSub] Gelen veri bekleniyor...\n" );
         vTaskDelay( pdMS_TO_TICKS( 2000 ) );
     }
+    
 }
 
 
