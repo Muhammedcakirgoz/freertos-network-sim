@@ -416,7 +416,7 @@ static void vNetworkTask( void *pvParameters )
             for( ;; )
             {
                 char testMesaji[ 64 ];
-                snprintf( testMesaji, sizeof( testMesaji ), "Merhaba broker! Mesaj no: %d", mesajSayaci );
+                snprintf( testMesaji, sizeof( testMesaji ), "Merhaba broker! Mesaj no: %d\n", mesajSayaci );
 
                 send( clientSocket, testMesaji, (int) strlen( testMesaji ), 0 );
                 printf( "[Network] Mesaj gonderildi: %s\n", testMesaji );
@@ -442,6 +442,20 @@ static void vNetworkTask( void *pvParameters )
                     recvBuffer[ bytesReceived ] = '\0';
                     printf( "[Network] SUBSCRIBER veri aldi: %s\n", recvBuffer );
                 }
+                else if( bytesReceived == 0 )
+                {
+                    printf( "[Network] Broker baglantiyi kapatti.\n" );
+                    break;
+                }
+                else
+                {
+                    int hataKodu = WSAGetLastError();
+                    if( hataKodu != WSAEWOULDBLOCK )
+                    {
+                        printf( "[Network] HATA: recv() basarisiz, kod: %d\n", hataKodu );
+                        break;
+                    }
+                }
 
                 vTaskDelay( pdMS_TO_TICKS( 100 ) );
             }
@@ -461,6 +475,8 @@ static void vClientHandlerTask( void *pvParameters )
     ioctlsocket( clientSocket, FIONBIO, &ulMode );
 
     char recvBuffer[ 256 ];
+    char mesajBuffer[ 1024 ] = { 0 };  /* biriken veriyi tutan kalici buffer */
+    int mesajBufferUzunluk = 0;
 
     /* --- ILK ASAMA: Kimlik mesajini bekle ---
      * Client, baglandiktan hemen sonra "ROLE:PUBLISHER" ya da
@@ -532,7 +548,7 @@ static void vClientHandlerTask( void *pvParameters )
     }
 
     /* --- IKINCI ASAMA: Normal veri dinleme donguse --- */
-    for( ;; )
+        for( ;; )
     {
         int bytesReceived = recv( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1, 0 );
 
@@ -540,29 +556,75 @@ static void vClientHandlerTask( void *pvParameters )
         {
             recvBuffer[ bytesReceived ] = '\0';
 
-            /* --- AUTHORIZATION KONTROLU ---
-            * Bu client SUBSCRIBER olarak kayitliysa, veri GONDERMEYE
-            * yetkisi yok - sadece dinleyebilir. Eger yine de veri
-            * gonderirse, bunu bir yetki ihlali olarak logluyoruz ve
-            * veriyi ISLEMEDEN reddediyoruz. */
-            if( bIsSubscriber )
+            /* Gelen veriyi kalici buffer'a EKLE (biriktir) */
+            if( mesajBufferUzunluk + bytesReceived < (int) sizeof( mesajBuffer ) - 1 )
             {
-                printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
-                        "calisti, veri reddediliyor. Gelen: %s\n", recvBuffer );
+                memcpy( mesajBuffer + mesajBufferUzunluk, recvBuffer, bytesReceived );
+                mesajBufferUzunluk += bytesReceived;
+                mesajBuffer[ mesajBufferUzunluk ] = '\0';
             }
-            else
+
+            /* Buffer icinde tam mesaj(lar) var mi diye kontrol et -
+            * '\n' karakterini ara. Birden fazla mesaj birikmis olabilir,
+            * bu yuzden WHILE ile hepsini sirayla isliyoruz. */
+            char *newlinePos;
+            while( ( newlinePos = strchr( mesajBuffer, '\n' ) ) != NULL )
             {
-                /* Bu bir PUBLISHER - veri gonderme yetkisi var, isle. */
-                printf( "[ClientHandler] Veri alindi: %s\n", recvBuffer );
+                /* '\n' karakterinin oldugu yeri '\0' yaparak, tek bir
+                * tam mesaji izole ediyoruz. */
+                *newlinePos = '\0';
 
-                xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-                for( int i = 0; i < xSubscriberCount; i++ )
+                /* --- TEMEL VERI DOGRULAMASI --- */
+                int mesajUzunlugu = (int) strlen( mesajBuffer );
+
+                if( mesajUzunlugu == 0 )
                 {
-                    send( xSubscriberSockets[ i ], recvBuffer, bytesReceived, 0 );
+                    /* Bos mesaj - islenecek bir sey yok, atla. */
+                    printf( "[ClientHandler] UYARI: Bos mesaj alindi, yok sayiliyor.\n" );
                 }
-                xSemaphoreGive( xSubscriberListMutex );
+                else if( mesajUzunlugu > 200 )
+                {
+                    /* Beklenenden cok uzun bir mesaj - supheli, reddet.
+                    * (Normal test mesajlarimiz ~40-50 karakter civarinda.) */
+                    printf( "[ClientHandler] UYARI: Anormal uzunlukta mesaj (%d byte), "
+                            "reddediliyor.\n", mesajUzunlugu );
+                }
+                else
+                {
+                    /* Artik 'mesajBuffer' basindan '\0'a kadar TEK bir
+                    * tam mesaj iceriyor. */
+                    if( bIsSubscriber )
+                    {
+                        printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
+                                "calisti, veri reddediliyor. Gelen: %s\n", mesajBuffer );
+                    }
+                    else
+                    {
+                            printf( "[ClientHandler] Veri alindi: %s\n", mesajBuffer );
 
-                printf( "[ClientHandler] Veri %d subscriber'a iletildi.\n", xSubscriberCount );
+                            xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+                            for( int i = 0; i < xSubscriberCount; i++ )
+                            {
+                                /* Subscriber'a giderken de '\n' ekliyoruz -
+                                * cunku subscriber tarafi da ayni framing mantigini
+                                * bekleyecek. */
+                                char gonderilecekMesaj[ 300 ];
+                                snprintf( gonderilecekMesaj, sizeof( gonderilecekMesaj ), "%s\n", mesajBuffer );
+                                send( xSubscriberSockets[ i ], gonderilecekMesaj, (int) strlen( gonderilecekMesaj ), 0 );
+                            }
+                            xSemaphoreGive( xSubscriberListMutex );
+
+                            printf( "[ClientHandler] Veri %d subscriber'a iletildi.\n", xSubscriberCount );
+                    }
+                }
+                /* Islenen mesaji buffer'dan CIKAR - kalan kismi (varsa
+                * bir sonraki mesajin basi) buffer'in basina kaydir. */
+                int islenenUzunluk = (int)( newlinePos - mesajBuffer ) + 1;
+                int kalanUzunluk = mesajBufferUzunluk - islenenUzunluk;
+
+                memmove( mesajBuffer, newlinePos + 1, kalanUzunluk );
+                mesajBufferUzunluk = kalanUzunluk;
+                mesajBuffer[ mesajBufferUzunluk ] = '\0';
             }
         }
         else if( bytesReceived == 0 )
@@ -570,6 +632,26 @@ static void vClientHandlerTask( void *pvParameters )
             printf( "[ClientHandler] Client baglantiyi kapatti.\n" );
             break;
         }
+        else    
+        {
+            /* bytesReceived < 0 - bir hata kodu var, AMA bu her zaman
+            * gercek bir hata anlamina gelmez. Non-blocking modda,
+            * "su an veri yok" durumu da boyle rapor edilir. */
+            int hataKodu = WSAGetLastError();
+
+            if( hataKodu != WSAEWOULDBLOCK )
+            {
+                /* WSAEWOULDBLOCK DISINDA bir kod geldi - bu GERCEK bir hata,
+                * ornegin karsi taraf aniden koptu (WSAECONNRESET) gibi. */
+                printf( "[ClientHandler] HATA: recv() basarisiz, kod: %d - "
+                        "baglanti sonlandiriliyor.\n", hataKodu );
+                break;
+            }
+            /* hataKodu == WSAEWOULDBLOCK ise: normal durum, veri yok,
+            * dongu devam etsin. */
+        }
+
+
 
         vTaskDelay( pdMS_TO_TICKS( 100 ) );
     }
