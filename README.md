@@ -109,6 +109,24 @@ Publisher'ın gönderdiği verinin, broker üzerinden subscriber'a ulaştığın
 - [x] Temel veri doğrulama (recv hata kodu ayrımı, boş/aşırı uzun mesaj reddi)
 - [x] JSON mesaj formatına geçiş (cJSON kütüphanesi ile)
 - [x] JSON format/schema doğrulaması (parse hatası, eksik/yanlış tipte alan kontrolü)
+- [x] Broker durumunu ve sensör verisini izleyen bağımsız Python/Tkinter monitor aracı
+
+## Monitor Aracı (İzleme Paneli)
+
+Projeye, broker'ı **normal bir subscriber gibi** dinleyen, bağımsız bir Python/Tkinter masaüstü aracı eklenmiştir. Bu araç, FreeRTOS/C kod tabanından tamamen ayrıdır — sadece TCP soket üzerinden broker'a bağlanıp standart JSON protokolünü okur. Bu tasarım, gerçek endüstriyel sistemlerdeki "cihaz verisini bir SCADA/dashboard yazılımıyla izleme" desenini birebir yansıtmaktadır.
+
+**Özellikler:**
+- Bağlı subscriber sayısının canlı gösterimi (`system/status` topic'i üzerinden)
+- Sensör verisinin (`sensor/sicaklik` topic'i) gerçek zamanlı çizgi grafiği
+- Gelen mesajların log akışı
+
+**Çalıştırma:**
+
+```bash
+python monitor.py
+```
+
+Ek kütüphane kurulumu gerekmez — araç, yalnızca Python'ın standart kütüphanelerini (`socket`, `json`, `threading`, `tkinter`) kullanır. Broker'ın çalışıyor olması ve `monitor.py` içindeki `AUTH_TOKEN` değerinin, `main.c`'deki `SHARED_AUTH_TOKEN` ile aynı olması gerekmektedir.
 
 ## Yol Haritası (Devam Eden Çalışma)
 
@@ -124,8 +142,9 @@ Publisher'ın gönderdiği verinin, broker üzerinden subscriber'a ulaştığın
 ├── main.c              # Ana uygulama kodu (task tanımları, network mantığı)
 ├── CMakeLists.txt       # Derleme yapılandırması
 ├── FreeRTOSConfig.h     # FreeRTOS kernel yapılandırma ayarları
+├── monitor.py           # Bağımsız Python/Tkinter izleme aracı
 ├── cJSON/
-│   ├── cJSON.c          # JSON kütüphanesi (üçüncü parti)
+│   ├── cJSON.c
 │   └── cJSON.h
 └── README.md
 ```
