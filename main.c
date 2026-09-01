@@ -1,3 +1,4 @@
+#include "cJSON.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -408,18 +409,39 @@ static void vNetworkTask( void *pvParameters )
             printf( "[Network] Kimlik bildirildi: %s\n", kimlikMesaji );
 
 
-           if( xRole == ROLE_PUBLISHER )
+        if( xRole == ROLE_PUBLISHER )
         {
-            /* PUBLISHER: periyodik olarak test mesaji gonder */
+            /* PUBLISHER: periyodik olarak SAHTE SENSOR VERISI uret,
+            * JSON formatinda paketleyip gonder. */
             int mesajSayaci = 0;
 
             for( ;; )
             {
-                char testMesaji[ 64 ];
-                snprintf( testMesaji, sizeof( testMesaji ), "Merhaba broker! Mesaj no: %d\n", mesajSayaci );
+                /* --- 1) Sahte sensor verisi uret --- */
+                float sahteDeger = 20.0f + ( rand() % 100 ) / 10.0f;  /* 20.0 - 30.0 arasi */
 
-                send( clientSocket, testMesaji, (int) strlen( testMesaji ), 0 );
-                printf( "[Network] Mesaj gonderildi: %s\n", testMesaji );
+                char payloadStr[ 16 ];
+                snprintf( payloadStr, sizeof( payloadStr ), "%.1f", sahteDeger );
+
+                /* --- 2) cJSON nesnesi olustur --- */
+                cJSON *root = cJSON_CreateObject();
+                cJSON_AddStringToObject( root, "topic", "sensor/sicaklik" );
+                cJSON_AddStringToObject( root, "payload", payloadStr );
+                cJSON_AddNumberToObject( root, "mesaj_no", mesajSayaci );
+
+                /* --- 3) JSON'u string'e cevir (serialize) --- */
+                char *jsonString = cJSON_PrintUnformatted( root );
+
+                /* --- 4) Framing icin sonuna '\n' ekleyip gonder --- */
+                char gonderilecekVeri[ 256 ];
+                snprintf( gonderilecekVeri, sizeof( gonderilecekVeri ), "%s\n", jsonString );
+
+                send( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ), 0 );
+                printf( "[Network] JSON mesaj gonderildi: %s\n", jsonString );
+
+                /* --- 5) cJSON'un ayirdigi bellegi TEMIZLE - onemli! --- */
+                cJSON_free( jsonString );
+                cJSON_Delete( root );
 
                 mesajSayaci++;
                 vTaskDelay( pdMS_TO_TICKS( 3000 ) );
@@ -432,6 +454,8 @@ static void vNetworkTask( void *pvParameters )
             ioctlsocket( clientSocket, FIONBIO, &ulMode );
 
             char recvBuffer[ 256 ];
+            char mesajBuffer[ 1024 ] = { 0 };  /* framing icin biriktirme buffer'i */
+            int mesajBufferUzunluk = 0;
 
             for( ;; )
             {
@@ -440,7 +464,56 @@ static void vNetworkTask( void *pvParameters )
                 if( bytesReceived > 0 )
                 {
                     recvBuffer[ bytesReceived ] = '\0';
-                    printf( "[Network] SUBSCRIBER veri aldi: %s\n", recvBuffer );
+
+                    /* Gelen veriyi kalici buffer'a ekle (broker tarafiyla ayni mantik) */
+                    if( mesajBufferUzunluk + bytesReceived < (int) sizeof( mesajBuffer ) - 1 )
+                    {
+                        memcpy( mesajBuffer + mesajBufferUzunluk, recvBuffer, bytesReceived );
+                        mesajBufferUzunluk += bytesReceived;
+                        mesajBuffer[ mesajBufferUzunluk ] = '\0';
+                    }
+
+                    /* Buffer icinde tam mesaj(lar) var mi diye kontrol et */
+                    char *newlinePos;
+                    while( ( newlinePos = strchr( mesajBuffer, '\n' ) ) != NULL )
+                    {
+                        *newlinePos = '\0';
+
+                        /* --- JSON DOGRULAMASI (broker ile ayni mantik) --- */
+                        cJSON *parsedJson = cJSON_Parse( mesajBuffer );
+
+                        if( parsedJson == NULL )
+                        {
+                            printf( "[Network] UYARI: Gecersiz JSON alindi, yok sayiliyor. "
+                                    "Gelen: %s\n", mesajBuffer );
+                        }
+                        else
+                        {
+                            cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
+                            cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
+
+                            if( topicItem != NULL && cJSON_IsString( topicItem ) &&
+                                payloadItem != NULL && cJSON_IsString( payloadItem ) )
+                            {
+                                printf( "[Network] SUBSCRIBER veri aldi -> topic: %s, payload: %s\n",
+                                        topicItem->valuestring, payloadItem->valuestring );
+                            }
+                            else
+                            {
+                                printf( "[Network] UYARI: JSON gecerli ama gerekli alanlar eksik.\n" );
+                            }
+
+                            cJSON_Delete( parsedJson );
+                        }
+
+                        /* Islenen mesaji buffer'dan cikar, kalani basa kaydir */
+                        int islenenUzunluk = (int)( newlinePos - mesajBuffer ) + 1;
+                        int kalanUzunluk = mesajBufferUzunluk - islenenUzunluk;
+
+                        memmove( mesajBuffer, newlinePos + 1, kalanUzunluk );
+                        mesajBufferUzunluk = kalanUzunluk;
+                        mesajBuffer[ mesajBufferUzunluk ] = '\0';
+                    }
                 }
                 else if( bytesReceived == 0 )
                 {
@@ -591,23 +664,45 @@ static void vClientHandlerTask( void *pvParameters )
                 }
                 else
                 {
-                    /* Artik 'mesajBuffer' basindan '\0'a kadar TEK bir
-                    * tam mesaj iceriyor. */
-                    if( bIsSubscriber )
+                    /* --- JSON DOGRULAMASI --- */
+                    cJSON *parsedJson = cJSON_Parse( mesajBuffer );
+
+                    if( parsedJson == NULL )
                     {
-                        printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
-                                "calisti, veri reddediliyor. Gelen: %s\n", mesajBuffer );
+                        /* JSON parse basarisiz - bozuk/gecersiz veri. */
+                        printf( "[ClientHandler] UYARI: Gecersiz JSON alindi, reddediliyor. "
+                                "Gelen: %s\n", mesajBuffer );
                     }
                     else
                     {
-                            printf( "[ClientHandler] Veri alindi: %s\n", mesajBuffer );
+                        /* JSON gecerli - simdi gerekli alanlarin var olup olmadigini
+                        * ve dogru tipte olup olmadigini kontrol ediyoruz. */
+                        cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
+                        cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
 
+                        bool bGecerliMesaj = true;
+
+                        if( topicItem == NULL || !cJSON_IsString( topicItem ) )
+                        {
+                            printf( "[ClientHandler] UYARI: 'topic' alani eksik veya hatali tipte.\n" );
+                            bGecerliMesaj = false;
+                        }
+
+                        if( payloadItem == NULL || !cJSON_IsString( payloadItem ) )
+                        {
+                            printf( "[ClientHandler] UYARI: 'payload' alani eksik veya hatali tipte.\n" );
+                            bGecerliMesaj = false;
+                        }
+
+                        if( bGecerliMesaj )
+                        {
+                            printf( "[ClientHandler] Gecerli JSON alindi -> topic: %s, payload: %s\n",
+                                    topicItem->valuestring, payloadItem->valuestring );
+
+                            /* Dogrulanan veriyi subscriber'lara ilet. */
                             xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
                             for( int i = 0; i < xSubscriberCount; i++ )
                             {
-                                /* Subscriber'a giderken de '\n' ekliyoruz -
-                                * cunku subscriber tarafi da ayni framing mantigini
-                                * bekleyecek. */
                                 char gonderilecekMesaj[ 300 ];
                                 snprintf( gonderilecekMesaj, sizeof( gonderilecekMesaj ), "%s\n", mesajBuffer );
                                 send( xSubscriberSockets[ i ], gonderilecekMesaj, (int) strlen( gonderilecekMesaj ), 0 );
@@ -615,6 +710,15 @@ static void vClientHandlerTask( void *pvParameters )
                             xSemaphoreGive( xSubscriberListMutex );
 
                             printf( "[ClientHandler] Veri %d subscriber'a iletildi.\n", xSubscriberCount );
+                        }
+                        else
+                        {
+                            printf( "[ClientHandler] Mesaj eksik/hatali alanlar icerdigi icin "
+                                    "subscriber'lara iletilmedi.\n" );
+                        }
+
+                        /* --- ONEMLI: parsedJson icin ayrilan bellegi TEMIZLE --- */
+                        cJSON_Delete( parsedJson );
                     }
                 }
                 /* Islenen mesaji buffer'dan CIKAR - kalan kismi (varsa

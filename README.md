@@ -103,16 +103,19 @@ Publisher'ın gönderdiği verinin, broker üzerinden subscriber'a ulaştığın
 - [x] Her bağlanan client için dinamik FreeRTOS task oluşturma
 - [x] Mutex ile korunan subscriber listesi
 - [x] Publisher → Broker → Subscriber uçtan uca veri akışı
+- [x] Authentication: token bazlı bağlantı doğrulama
+- [x] Authorization: rol bazlı yetki kontrolü (subscriber'ın publish edememesi)
+- [x] TCP framing çözümü (mesaj sınırlarının `\n` ayracı ile belirlenmesi)
+- [x] Temel veri doğrulama (recv hata kodu ayrımı, boş/aşırı uzun mesaj reddi)
+- [x] JSON mesaj formatına geçiş (cJSON kütüphanesi ile)
+- [x] JSON format/schema doğrulaması (parse hatası, eksik/yanlış tipte alan kontrolü)
 
 ## Yol Haritası (Devam Eden Çalışma)
 
-- [ ] Mesaj formatını JSON'a taşımak (cJSON kütüphanesi ile)
-- [ ] TCP framing sorununu çözmek (mesaj sınırlarını ayraç/uzunluk öneki ile belirlemek)
-- [ ] Authentication: bağlanan client'ların token ile doğrulanması
-- [ ] Authorization: rol bazlı yetki kontrolü (subscriber'ın publish edememesi gibi)
 - [ ] Internal Comm task'ı ile Network task'ı arasında Queue kullanımı
 - [ ] Priority Inversion testleri (mutex + öncelik önceliklendirmesi senaryoları)
 - [ ] ESP32 platformuna taşınabilirlik (network katmanının soyutlanması)
+- [ ] cJSON parse/doğrulama mantığının ortak bir yardımcı fonksiyona çıkarılması (kod tekrarını azaltmak için)
 
 ## Proje Yapısı
 
@@ -121,9 +124,22 @@ Publisher'ın gönderdiği verinin, broker üzerinden subscriber'a ulaştığın
 ├── main.c              # Ana uygulama kodu (task tanımları, network mantığı)
 ├── CMakeLists.txt       # Derleme yapılandırması
 ├── FreeRTOSConfig.h     # FreeRTOS kernel yapılandırma ayarları
+├── cJSON/
+│   ├── cJSON.c          # JSON kütüphanesi (üçüncü parti)
+│   └── cJSON.h
 └── README.md
 ```
 
 ## Notlar
 
 Bu proje, bir staj programı kapsamında, gömülü sistemlerdeki RTOS ve ağ haberleşmesi kavramlarını öğrenmek amacıyla geliştirilmektedir.
+
+## Mesaj Formatı
+
+Sistem, veri taşımak için JSON formatını kullanır:
+
+```json
+{"topic":"sensor/sicaklik","payload":"24.1","mesaj_no":0}
+```
+
+Mesajlar TCP üzerinden gönderilirken, mesaj sınırlarını belirlemek amacıyla her mesajın sonuna bir satır sonu karakteri (`\n`) eklenir. Broker ve subscriber, gelen JSON verisini `cJSON_Parse()` ile ayrıştırıp gerekli alanların (`topic`, `payload`) varlığını ve tipini doğrular; geçersiz veya eksik veriler işlenmeden reddedilir.

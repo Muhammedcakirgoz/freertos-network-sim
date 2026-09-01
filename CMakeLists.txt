@@ -20,6 +20,7 @@ set(FREERTOS_SOURCES
 # --- Demo (uygulama) dosyaları ---
 set(DEMO_SOURCES
     main.c
+    cJSON/cJSON.c
 )
 
 add_executable(freertos_demo
@@ -29,6 +30,7 @@ add_executable(freertos_demo
 
 target_include_directories(freertos_demo PRIVATE
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/cJSON
     ${KERNEL_DIR}/include
     ${KERNEL_DIR}/portable/MSVC-MingW
 )
