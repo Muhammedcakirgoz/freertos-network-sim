@@ -23,6 +23,17 @@ typedef enum
 
 static SystemRole_t xMyRole = ROLE_UNDEFINED;
 
+/* Network task'tan Internal Comm task'a JSON verisini tasimak icin
+ * kullanilan yapi. Queue'lar veriyi KOPYALAYARAK tasidigi icin,
+ * pointer degil, sabit boyutlu diziler kullaniyoruz. */
+typedef struct
+{
+    char topic[ 64 ];
+    char payload[ 64 ];
+} SensorData_t;
+
+static QueueHandle_t xInternalCommQueue = NULL;
+
 
 
 /* ---------------------------------------------------------------------
@@ -122,6 +133,16 @@ int main( int argc, char *argv[] )
         printf( "HATA: Subscriber mutex'i olusturulamadi!\n" );
         return EXIT_FAILURE;
     }
+
+    /* Network -> Internal Comm arasi veri tasimak icin queue.
+    * 10 eleman kapasiteli - ayni anda en fazla 10 mesaj biriktirebilir. */
+    xInternalCommQueue = xQueueCreate( 10, sizeof( SensorData_t ) );
+    if( xInternalCommQueue == NULL )
+    {
+        printf( "HATA: Internal Comm queue'su olusturulamadi!\n" );
+        return EXIT_FAILURE;
+    }
+
 
     /* 2) ADIM: Role uygun task'lari olustur. */
     prvCreateTasksForRole( xMyRole );
@@ -256,6 +277,36 @@ static void vHealthTask( void *pvParameters )
                 "(bos heap: %u byte)\n",
                 ( unsigned int ) xPortGetFreeHeapSize() );
 
+        /* BROKER'a ozel: bagli subscriber sayisini periyodik olarak
+         * "system/status" topic'i altinda tum subscriber'lara
+         * yayinla. Boylece bir monitor arac (subscriber gibi
+         * baglanan) bu sayiyi gorebilir. */
+        if( xMyRole == ROLE_BROKER && xSubscriberListMutex != NULL )
+        {
+            xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+
+            cJSON *statusRoot = cJSON_CreateObject();
+            cJSON_AddStringToObject( statusRoot, "topic", "system/status" );
+
+            char sayiStr[ 16 ];
+            snprintf( sayiStr, sizeof( sayiStr ), "%d", xSubscriberCount );
+            cJSON_AddStringToObject( statusRoot, "payload", sayiStr );
+
+            char *statusJson = cJSON_PrintUnformatted( statusRoot );
+            char gonderilecek[ 300 ];
+            snprintf( gonderilecek, sizeof( gonderilecek ), "%s\n", statusJson );
+
+            for( int i = 0; i < xSubscriberCount; i++ )
+            {
+                send( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ), 0 );
+            }
+
+            cJSON_free( statusJson );
+            cJSON_Delete( statusRoot );
+
+            xSemaphoreGive( xSubscriberListMutex );
+        }
+
         vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( 1000 ) );
     }
 }
@@ -263,10 +314,18 @@ static void vHealthTask( void *pvParameters )
 static void vInternalCommTask( void *pvParameters )
 {
     ( void ) pvParameters;
+    SensorData_t alinanVeri;
 
-    for( ;; )
+     for( ;; )
     {
-        vTaskDelay( pdMS_TO_TICKS( 500 ) );
+        /* Queue'da veri gelene kadar BEKLE (portMAX_DELAY).
+         * Bu, vTaskDelay'e gerek birakmiyor - task zaten queue
+         * bos oldugu surece CPU'yu kullanmiyor (Blocked durumda). */
+        if( xQueueReceive( xInternalCommQueue, &alinanVeri, portMAX_DELAY ) == pdPASS )
+        {
+            printf( "[InternalComm] Veri islendi -> topic: %s, payload: %s\n",
+                    alinanVeri.topic, alinanVeri.payload );
+        }
     }
 }
 
@@ -493,10 +552,23 @@ static void vNetworkTask( void *pvParameters )
                             cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
 
                             if( topicItem != NULL && cJSON_IsString( topicItem ) &&
-                                payloadItem != NULL && cJSON_IsString( payloadItem ) )
+                            payloadItem != NULL && cJSON_IsString( payloadItem ) )
                             {
-                                printf( "[Network] SUBSCRIBER veri aldi -> topic: %s, payload: %s\n",
-                                        topicItem->valuestring, payloadItem->valuestring );
+                                /* Dogrulanan veriyi ISLEMEK yerine, Internal Comm task'ina
+                                * QUEUE uzerinden gonderiyoruz - artik bu task sadece
+                                * "network'ten veri al ve ilet" gorevini yapiyor. */
+                                SensorData_t veri;
+                                strncpy( veri.topic, topicItem->valuestring, sizeof( veri.topic ) - 1 );
+                                veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
+                                strncpy( veri.payload, payloadItem->valuestring, sizeof( veri.payload ) - 1 );
+                                veri.payload[ sizeof( veri.payload ) - 1 ] = '\0';
+
+                                /* portMAX_DELAY: queue doluysa, yer acilana kadar bekle.
+                                * (Simdilik dolma ihtimali cok dusuk, 10 elemanlik kapasite var.) */
+                                if( xQueueSend( xInternalCommQueue, &veri, portMAX_DELAY ) != pdPASS )
+                                {
+                                    printf( "[Network] UYARI: Veri Internal Comm queue'suna gonderilemedi.\n" );
+                                }
                             }
                             else
                             {
