@@ -11,6 +11,7 @@
 #include "queue.h"
 #include "semphr.h"
 #include <stdbool.h>
+#include "timers.h"
 
 
 typedef enum
@@ -83,6 +84,8 @@ static TaskHandle_t xInternalCommTaskHandle    = NULL;
 static TaskHandle_t xNetworkTaskHandle         = NULL;
 static TaskHandle_t xMqttPublisherTaskHandle   = NULL;
 static TaskHandle_t xMqttSubscriberTaskHandle  = NULL;
+/* Broker durum yayini icin software timer. */
+static TimerHandle_t xStatusTimer = NULL;
 
 static void vHealthTask( void *pvParameters );
 static void vInternalCommTask( void *pvParameters );
@@ -94,6 +97,7 @@ static void vClientHandlerTask( void *pvParameters );
 static SystemRole_t prvParseRoleFromArgs( int argc, char *argv[] );
 static void prvPrintUsage( const char *pcProgramName );
 static void prvCreateTasksForRole( SystemRole_t xRole );
+static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 
 int main( int argc, char *argv[] )
 {
@@ -158,7 +162,30 @@ int main( int argc, char *argv[] )
         printf( "HATA: Publish queue'su olusturulamadi!\n" );
         return EXIT_FAILURE;
     }
+    /* Sadece BROKER rolunde durum yayini timer'ini olustur - digger
+    * rollerin buna ihtiyaci yok. */
+    if( xMyRole == ROLE_BROKER )
+    {
+    xStatusTimer = xTimerCreate(
+        "StatusTimer",              /* timer ismi (debug icin) */
+        pdMS_TO_TICKS( 2000 ),      /* periyot: 2 saniyede bir */
+        pdTRUE,                      /* pdTRUE = otomatik tekrar (periyodik) */
+        NULL,                         /* timer ID - kullanmiyoruz */
+        vStatusBroadcastCallback      /* callback fonksiyonu */
+    );
 
+    if( xStatusTimer == NULL )
+    {
+        printf( "HATA: Status timer olusturulamadi!\n" );
+        return EXIT_FAILURE;
+    }
+
+    if( xTimerStart( xStatusTimer, 0 ) != pdPASS )
+    {
+        printf( "HATA: Status timer baslatilamadi!\n" );
+        return EXIT_FAILURE;
+    }
+}
 
     /* 2) ADIM: Role uygun task'lari olustur. */
     prvCreateTasksForRole( xMyRole );
@@ -816,37 +843,56 @@ static void vClientHandlerTask( void *pvParameters )
     vTaskDelete( NULL );
 }
 
-/* GECICI TEST TASK'I - Priority Inversion senaryosunu tetiklemek icin.
- * Orta oncelikli (InternalComm ile ayni seviyede), surekli CPU
- * mesgul eden bir task. Mutex ile HICBIR ilgisi yok - amaci sadece
- * dusuk oncelikli task'i (ClientHandler) kesip, onun mutex'i
- * birakmasini geciktirmek. */
-static void vMesgulTask( void *pvParameters )
+/* =======================================================================
+ * vStatusBroadcastCallback()
+ *
+ * Bu fonksiyon AYRI BIR TASK DEGIL - Timer Service Task tarafindan,
+ * belirlenen periyotta (2 saniyede bir) otomatik cagrilir. Health Task'in
+ * kendi stack'ini kullanmiyor, ayri bir stack tahsisi de gerekmiyor.
+ * ===================================================================== */
+static void vStatusBroadcastCallback( TimerHandle_t xTimer )
 {
-    ( void ) pvParameters;
-    int dongu_sayaci = 0;
+    ( void ) xTimer;
 
-    /* Broker'in listen() kurulumunu tamamlamasi ve bir subscriber'in
-     * baglanabilmesi icin baslangicta biraz bekliyoruz - boylece
-     * MesgulTask, testin tam ortasinda "aniden" devreye giriyor. */
-    vTaskDelay( pdMS_TO_TICKS( 8000 ) );
-
-    for( ;; )
+    if( xSubscriberListMutex == NULL )
     {
-        if( dongu_sayaci % 5 == 0 )
-        {
-            printf( "[MesgulTask] CPU mesgul ediliyor (Task M)...\n" );
-        }
-        dongu_sayaci++;
-
-        for( volatile long i = 0; i < 50000000; i++ )
-        {
-            /* bos dongu - CPU'yu bilerek mesgul ediyoruz */
-        }
+        return;
     }
+
+    /* ONEMLI: Timer callback'leri ASLA uzun sure ya da sinirsiz
+     * (portMAX_DELAY ile) bloklanmamali - cunku TUM timer'lar TEK BIR
+     * Timer Service Task uzerinde calisir. Bu callback bloklanirsa,
+     * sistemdeki DIGER TUM timer'lar da gecikir. Bu yuzden mutex'i
+     * SINIRLI bir sure (100ms) bekliyoruz, alamazsak bu turu atliyoruz. */
+    if( xSemaphoreTake( xSubscriberListMutex, pdMS_TO_TICKS( 100 ) ) != pdTRUE )
+    {
+        printf( "[StatusTimer] UYARI: Mutex alinamadi, bu tur atlaniyor.\n" );
+        return;
+    }
+
+    cJSON *statusRoot = cJSON_CreateObject();
+    cJSON_AddStringToObject( statusRoot, "topic", "system/status" );
+
+    char sayiStr[ 16 ];
+    snprintf( sayiStr, sizeof( sayiStr ), "%d", xSubscriberCount );
+    cJSON_AddStringToObject( statusRoot, "payload", sayiStr );
+
+    char *statusJson = cJSON_PrintUnformatted( statusRoot );
+    char gonderilecek[ 300 ];
+    snprintf( gonderilecek, sizeof( gonderilecek ), "%s\n", statusJson );
+
+    for( int i = 0; i < xSubscriberCount; i++ )
+    {
+        send( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ), 0 );
+    }
+
+    cJSON_free( statusJson );
+    cJSON_Delete( statusRoot );
+
+    xSemaphoreGive( xSubscriberListMutex );
+
+    printf( "[StatusTimer] Durum yayinlandi (subscriber sayisi: %d)\n", xSubscriberCount );
 }
-
-
 
 
 static void vMqttPublisherTask( void *pvParameters )
