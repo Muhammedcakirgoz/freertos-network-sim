@@ -101,6 +101,15 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 
 int main( int argc, char *argv[] )
 {
+
+      /* stdout'u UNBUFFERED (tamponsuz) moda al - boylece her printf()
+     * cagrisi HEMEN gonderilir, buffer dolmasini beklemez. Bu ozellikle
+     * cikti bir PIPE'a yonlendirildiginde (ornegin Python'un
+     * subprocess.Popen ile bu programi baslatip ciktisini okumasi gibi)
+     * kritik - cunku pipe'a yazarken C runtime varsayilan olarak
+     * TAM TAMPONLAMA kullanir, bu da ciktinin "gec, toplu halde"
+     * gelmesine sebep olur. */
+    setvbuf( stdout, NULL, _IONBF, 0 );
     
      /* 0) ADIM: Winsock kutuphanesini baslat.
      * Bu, Windows'a ozel bir zorunluluk - Linux/STM32'de bu adim
