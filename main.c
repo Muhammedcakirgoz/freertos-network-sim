@@ -23,16 +23,24 @@ typedef enum
 
 static SystemRole_t xMyRole = ROLE_UNDEFINED;
 
-/* Network task'tan Internal Comm task'a JSON verisini tasimak icin
- * kullanilan yapi. Queue'lar veriyi KOPYALAYARAK tasidigi icin,
- * pointer degil, sabit boyutlu diziler kullaniyoruz. */
 typedef struct
 {
     char topic[ 64 ];
     char payload[ 64 ];
 } SensorData_t;
 
+/* MQTT Publisher Task'tan Network Task'a GIDECEK veriyi tasiyan yapi.
+ * SensorData_t'den ayri tutuyoruz cunku farkli bir yonde, farkli bir
+ * amac icin kullaniliyor - mesaj_no alani da sadece bu yonde var. */
+typedef struct
+{
+    char topic[ 64 ];
+    char payload[ 16 ];
+    int  mesaj_no;
+} PublishData_t;
+
 static QueueHandle_t xInternalCommQueue = NULL;
+static QueueHandle_t xPublishQueue = NULL;
 
 
 
@@ -68,6 +76,7 @@ static QueueHandle_t xInternalCommQueue = NULL;
 static SOCKET xSubscriberSockets[ MAX_CLIENTS ];
 static int    xSubscriberCount = 0;
 static SemaphoreHandle_t xSubscriberListMutex = NULL;
+
 
 static TaskHandle_t xHealthTaskHandle          = NULL;
 static TaskHandle_t xInternalCommTaskHandle    = NULL;
@@ -133,13 +142,20 @@ int main( int argc, char *argv[] )
         printf( "HATA: Subscriber mutex'i olusturulamadi!\n" );
         return EXIT_FAILURE;
     }
-
+    
     /* Network -> Internal Comm arasi veri tasimak icin queue.
     * 10 eleman kapasiteli - ayni anda en fazla 10 mesaj biriktirebilir. */
     xInternalCommQueue = xQueueCreate( 10, sizeof( SensorData_t ) );
     if( xInternalCommQueue == NULL )
     {
         printf( "HATA: Internal Comm queue'su olusturulamadi!\n" );
+        return EXIT_FAILURE;
+    }
+    /* MQTT Publisher -> Network Task arasi veri tasimak icin. */
+    xPublishQueue = xQueueCreate( 10, sizeof( PublishData_t ) );
+    if( xPublishQueue == NULL )
+    {
+        printf( "HATA: Publish queue'su olusturulamadi!\n" );
         return EXIT_FAILURE;
     }
 
@@ -231,8 +247,8 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
     switch( xRole )
     {
         case ROLE_BROKER:
-            printf( "[main] Broker rolu - ek is mantigi task'i yok.\n" );
-            break;
+        printf( "[main] Broker rolu - ek is mantigi task'i yok.\n" );
+        break;
 
         case ROLE_PUBLISHER:
             xResult = xTaskCreate( vMqttPublisherTask,
@@ -277,35 +293,6 @@ static void vHealthTask( void *pvParameters )
                 "(bos heap: %u byte)\n",
                 ( unsigned int ) xPortGetFreeHeapSize() );
 
-        /* BROKER'a ozel: bagli subscriber sayisini periyodik olarak
-         * "system/status" topic'i altinda tum subscriber'lara
-         * yayinla. Boylece bir monitor arac (subscriber gibi
-         * baglanan) bu sayiyi gorebilir. */
-        if( xMyRole == ROLE_BROKER && xSubscriberListMutex != NULL )
-        {
-            xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-
-            cJSON *statusRoot = cJSON_CreateObject();
-            cJSON_AddStringToObject( statusRoot, "topic", "system/status" );
-
-            char sayiStr[ 16 ];
-            snprintf( sayiStr, sizeof( sayiStr ), "%d", xSubscriberCount );
-            cJSON_AddStringToObject( statusRoot, "payload", sayiStr );
-
-            char *statusJson = cJSON_PrintUnformatted( statusRoot );
-            char gonderilecek[ 300 ];
-            snprintf( gonderilecek, sizeof( gonderilecek ), "%s\n", statusJson );
-
-            for( int i = 0; i < xSubscriberCount; i++ )
-            {
-                send( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ), 0 );
-            }
-
-            cJSON_free( statusJson );
-            cJSON_Delete( statusRoot );
-
-            xSemaphoreGive( xSubscriberListMutex );
-        }
 
         vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( 1000 ) );
     }
@@ -470,40 +457,32 @@ static void vNetworkTask( void *pvParameters )
 
         if( xRole == ROLE_PUBLISHER )
         {
-            /* PUBLISHER: periyodik olarak SAHTE SENSOR VERISI uret,
-            * JSON formatinda paketleyip gonder. */
-            int mesajSayaci = 0;
+            /* Artik veri URETMIYORUZ - MQTT Publisher Task'in queue'ya
+            * koydugu veriyi BEKLIYORUZ (portMAX_DELAY sayesinde veri
+            * gelene kadar CPU'yu kullanmadan Blocked durumda kaliyoruz). */
+            PublishData_t gelenVeri;
 
             for( ;; )
             {
-                /* --- 1) Sahte sensor verisi uret --- */
-                float sahteDeger = 20.0f + ( rand() % 100 ) / 10.0f;  /* 20.0 - 30.0 arasi */
+                if( xQueueReceive( xPublishQueue, &gelenVeri, portMAX_DELAY ) == pdPASS )
+                {
+                    /* --- JSON nesnesi olustur --- */
+                    cJSON *root = cJSON_CreateObject();
+                    cJSON_AddStringToObject( root, "topic", gelenVeri.topic );
+                    cJSON_AddStringToObject( root, "payload", gelenVeri.payload );
+                    cJSON_AddNumberToObject( root, "mesaj_no", gelenVeri.mesaj_no );
 
-                char payloadStr[ 16 ];
-                snprintf( payloadStr, sizeof( payloadStr ), "%.1f", sahteDeger );
+                    char *jsonString = cJSON_PrintUnformatted( root );
 
-                /* --- 2) cJSON nesnesi olustur --- */
-                cJSON *root = cJSON_CreateObject();
-                cJSON_AddStringToObject( root, "topic", "sensor/sicaklik" );
-                cJSON_AddStringToObject( root, "payload", payloadStr );
-                cJSON_AddNumberToObject( root, "mesaj_no", mesajSayaci );
+                    char gonderilecekVeri[ 256 ];
+                    snprintf( gonderilecekVeri, sizeof( gonderilecekVeri ), "%s\n", jsonString );
 
-                /* --- 3) JSON'u string'e cevir (serialize) --- */
-                char *jsonString = cJSON_PrintUnformatted( root );
+                    send( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ), 0 );
+                    printf( "[Network] JSON mesaj gonderildi: %s\n", jsonString );
 
-                /* --- 4) Framing icin sonuna '\n' ekleyip gonder --- */
-                char gonderilecekVeri[ 256 ];
-                snprintf( gonderilecekVeri, sizeof( gonderilecekVeri ), "%s\n", jsonString );
-
-                send( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ), 0 );
-                printf( "[Network] JSON mesaj gonderildi: %s\n", jsonString );
-
-                /* --- 5) cJSON'un ayirdigi bellegi TEMIZLE - onemli! --- */
-                cJSON_free( jsonString );
-                cJSON_Delete( root );
-
-                mesajSayaci++;
-                vTaskDelay( pdMS_TO_TICKS( 3000 ) );
+                    cJSON_free( jsonString );
+                    cJSON_Delete( root );
+                }
             }
         }
         else
@@ -837,16 +816,69 @@ static void vClientHandlerTask( void *pvParameters )
     vTaskDelete( NULL );
 }
 
+/* GECICI TEST TASK'I - Priority Inversion senaryosunu tetiklemek icin.
+ * Orta oncelikli (InternalComm ile ayni seviyede), surekli CPU
+ * mesgul eden bir task. Mutex ile HICBIR ilgisi yok - amaci sadece
+ * dusuk oncelikli task'i (ClientHandler) kesip, onun mutex'i
+ * birakmasini geciktirmek. */
+static void vMesgulTask( void *pvParameters )
+{
+    ( void ) pvParameters;
+    int dongu_sayaci = 0;
+
+    /* Broker'in listen() kurulumunu tamamlamasi ve bir subscriber'in
+     * baglanabilmesi icin baslangicta biraz bekliyoruz - boylece
+     * MesgulTask, testin tam ortasinda "aniden" devreye giriyor. */
+    vTaskDelay( pdMS_TO_TICKS( 8000 ) );
+
+    for( ;; )
+    {
+        if( dongu_sayaci % 5 == 0 )
+        {
+            printf( "[MesgulTask] CPU mesgul ediliyor (Task M)...\n" );
+        }
+        dongu_sayaci++;
+
+        for( volatile long i = 0; i < 50000000; i++ )
+        {
+            /* bos dongu - CPU'yu bilerek mesgul ediyoruz */
+        }
+    }
+}
+
+
 
 
 static void vMqttPublisherTask( void *pvParameters )
 {
     ( void ) pvParameters;
+    int mesajSayaci = 0;
 
     for( ;; )
     {
-        printf( "[MqttPub] Sahte sensor verisi uretiliyor...\n" );
-        vTaskDelay( pdMS_TO_TICKS( 2000 ) );
+        /* --- Sahte sensor verisi uret (ARTIK BURADA, Network Task'ta DEGIL) --- */
+        PublishData_t veri;
+
+        float sahteDeger = 20.0f + ( rand() % 100 ) / 10.0f;
+        snprintf( veri.payload, sizeof( veri.payload ), "%.1f", sahteDeger );
+
+        strncpy( veri.topic, "sensor/sicaklik", sizeof( veri.topic ) - 1 );
+        veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
+
+        veri.mesaj_no = mesajSayaci;
+
+        printf( "[MqttPub] Veri uretildi: %s = %s (no: %d)\n",
+                veri.topic, veri.payload, mesajSayaci );
+
+        /* Ureteni Network Task'a TESLIM ET - JSON'a cevirme ve
+         * gonderme islerine hic karismiyoruz, o Network Task'in isi. */
+        if( xQueueSend( xPublishQueue, &veri, portMAX_DELAY ) != pdPASS )
+        {
+            printf( "[MqttPub] UYARI: Veri Network task'ina iletilemedi (queue dolu).\n" );
+        }
+
+        mesajSayaci++;
+        vTaskDelay( pdMS_TO_TICKS( 3000 ) );
     }
 }
 
