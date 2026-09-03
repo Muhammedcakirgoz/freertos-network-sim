@@ -62,7 +62,8 @@ static QueueHandle_t xPublishQueue = NULL;
 #define STACK_SIZE_CLIENT_HANDLER  ( configMINIMAL_STACK_SIZE * 4 )
 #define MAX_CLIENTS                 5
 #define SHARED_AUTH_TOKEN           "gizli_sifre123"
-
+#define DEFAULT_PORT         8080
+#define DEFAULT_BROKER_IP    "127.0.0.1"
 
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
@@ -86,6 +87,12 @@ static TaskHandle_t xMqttPublisherTaskHandle   = NULL;
 static TaskHandle_t xMqttSubscriberTaskHandle  = NULL;
 /* Broker durum yayini icin software timer. */
 static TimerHandle_t xStatusTimer = NULL;
+/* Komut satirindan override edilebilen ag ayarlari. Varsayilan
+ * degerlerle baslar, prvParseNetworkArgsFromArgs() cagrildiginda
+ * kullanici argüman verdiyse guncellenir. */
+static int  xPortNumarasi = DEFAULT_PORT;
+static char cBrokerIP[ 64 ] = DEFAULT_BROKER_IP;
+
 
 static void vHealthTask( void *pvParameters );
 static void vInternalCommTask( void *pvParameters );
@@ -95,7 +102,8 @@ static void vMqttSubscriberTask( void *pvParameters );
 static void vClientHandlerTask( void *pvParameters );
 
 static SystemRole_t prvParseRoleFromArgs( int argc, char *argv[] );
-static void prvPrintUsage( const char *pcProgramName );
+static void prvParseNetworkArgsFromArgs( int argc, char *argv[] );  
+static void prvPrintUsage( const char *pcProgramName );  
 static void prvCreateTasksForRole( SystemRole_t xRole );
 static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 
@@ -131,6 +139,7 @@ int main( int argc, char *argv[] )
     /* 1) ADIM: Rolu belirle - HENUZ FreeRTOS scheduler baslamadi,
      *    normal C kodu olarak calisiyoruz. */
     xMyRole = prvParseRoleFromArgs( argc, argv );
+    prvParseNetworkArgsFromArgs( argc, argv );   /* <-- YENİ SATIR */
 
     if( xMyRole == ROLE_UNDEFINED )
     {
@@ -210,9 +219,44 @@ int main( int argc, char *argv[] )
 }
 /*-----------------------------------------------------------*/
 /* =======================================================================
- * prvParseRoleFromArgs()
- * Komut satiri argumanini okuyup enum'a cevirir.
+ * prvParseNetworkArgsFromArgs()
+ *
+ * Komut satirindan OPSIYONEL port ve broker IP argumanlarini okur:
+ *   argv[2] -> port numarasi (hem broker hem client icin)
+ *   argv[3] -> broker'in IP adresi (sadece publisher/subscriber icin
+ *              anlamli - broker kendi IP'sini dinlemez, INADDR_ANY
+ *              kullanir)
+ *
+ * Bu sayede, ayni .exe dosyasi FARKLI PORTLARDA birden fazla kez
+ * calistirilabilir - ornegin ayni bilgisayarda iki ayri broker
+ * instance'i (8080 ve 9090 gibi) es zamanli calisabilir.
  * ===================================================================== */
+static void prvParseNetworkArgsFromArgs( int argc, char *argv[] )
+{
+    if( argc >= 3 )
+    {
+        int girilenPort = atoi( argv[ 2 ] );
+
+        if( girilenPort > 0 && girilenPort <= 65535 )
+        {
+            xPortNumarasi = girilenPort;
+        }
+        else
+        {
+            printf( "[main] UYARI: Gecersiz port '%s', varsayilan %d kullanilacak.\n",
+                    argv[ 2 ], DEFAULT_PORT );
+        }
+    }
+
+    if( argc >= 4 )
+    {
+        strncpy( cBrokerIP, argv[ 3 ], sizeof( cBrokerIP ) - 1 );
+        cBrokerIP[ sizeof( cBrokerIP ) - 1 ] = '\0';
+    }
+
+    printf( "[main] Ag ayarlari -> Port: %d, Broker IP: %s\n",
+            xPortNumarasi, cBrokerIP );
+}
 static SystemRole_t prvParseRoleFromArgs( int argc, char *argv[] )
 {
     if( argc < 2 )
@@ -235,6 +279,7 @@ static SystemRole_t prvParseRoleFromArgs( int argc, char *argv[] )
 
     return ROLE_UNDEFINED;
 }
+
 
 /* =======================================================================
  * prvPrintUsage()
@@ -461,7 +506,7 @@ static void vNetworkTask( void *pvParameters )
         memset( &serverAddr, 0, sizeof( serverAddr ) );
         serverAddr.sin_family      = AF_INET;
         serverAddr.sin_addr.s_addr = INADDR_ANY;
-        serverAddr.sin_port        = htons( 8080 );
+        serverAddr.sin_port        = htons( (uint16_t) xPortNumarasi );
 
         if( bind( listenSocket, (struct sockaddr *) &serverAddr, sizeof( serverAddr ) ) == SOCKET_ERROR )
         {
@@ -478,7 +523,7 @@ static void vNetworkTask( void *pvParameters )
             vTaskDelete( NULL );
         }
 
-        printf( "[Network] Broker port 8080'de dinlemede...\n" );
+        printf( "[Network] Broker port %d'de dinlemede...\n", xPortNumarasi );
 
         /* Soketi NON-BLOCKING moda al. */
         u_long ulMode = 1;
@@ -535,10 +580,9 @@ static void vNetworkTask( void *pvParameters )
         struct sockaddr_in brokerAddr;
         memset( &brokerAddr, 0, sizeof( brokerAddr ) );
         brokerAddr.sin_family = AF_INET;
-        brokerAddr.sin_port   = htons( 8080 );
-
+        brokerAddr.sin_port   = htons( (uint16_t) xPortNumarasi );
         /* "127.0.0.1" (localhost) string'ini binary IP adresine cevir */
-        inet_pton( AF_INET, "127.0.0.1", &brokerAddr.sin_addr );
+        inet_pton( AF_INET, cBrokerIP, &brokerAddr.sin_addr );
 
         /* 3) BAGLANMAYI DENE - bu asamada BILEREK blocking birakiyoruz,
          * cunku "baglanana kadar bekle" burada mantikli bir davranis.
