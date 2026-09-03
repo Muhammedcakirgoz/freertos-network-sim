@@ -69,19 +69,20 @@ class ProcessPanel:
         "subscriber": "#9333ea",
     }
 
-    def __init__(self, parent, title, role_arg, row, col):
+    def __init__(self, parent, title, role_arg):
         self.role_arg = role_arg
         self.process = None
         self.running = False
 
         renk = self.RENK.get(role_arg, "#444")
 
-        frame = ttk.LabelFrame(parent, text=title, padding=8)
-        frame.grid(row=row, column=col, sticky="nsew", padx=6, pady=6)
-        parent.grid_columnconfigure(col, weight=1)
-        parent.grid_rowconfigure(row, weight=1)
+        # Bu LabelFrame'i disariya (self.frame) aciyoruz - cagiran kod
+        # (BrokerMonitor), bunu bir PanedWindow'a "pane" (bolme) olarak
+        # ekleyecek. Boylece kullanici, panelin genisligini FARE ILE
+        # SURUKLEYEREK ayarlayabiliyor - sabit grid hucreleri yerine.
+        self.frame = ttk.LabelFrame(parent, text=title, padding=8)
 
-        control_frame = ttk.Frame(frame)
+        control_frame = ttk.Frame(self.frame)
         control_frame.pack(fill="x")
 
         self.status_canvas = tk.Canvas(control_frame, width=14, height=14, highlightthickness=0)
@@ -95,11 +96,15 @@ class ProcessPanel:
         self.toggle_btn = ttk.Button(control_frame, text="Baslat", command=self.toggle)
         self.toggle_btn.pack(side="right")
 
-        self.log_text = tk.Text(frame, height=14, width=42, font=("Consolas", 8),
-                                 bg="#0b0f19", fg=renk, insertbackground=renk)
-        self.log_text.pack(fill="both", expand=True, pady=(8, 0))
+        text_wrapper = ttk.Frame(self.frame)
+        text_wrapper.pack(fill="both", expand=True, pady=(8, 0))
 
-        scrollbar = ttk.Scrollbar(frame, command=self.log_text.yview)
+        self.log_text = tk.Text(text_wrapper, height=14, width=42, font=("Consolas", 8),
+                                 bg="#0b0f19", fg=renk, insertbackground=renk, wrap="none")
+        self.log_text.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(text_wrapper, command=self.log_text.yview)
+        scrollbar.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
     # -------------------------------------------------------------
@@ -191,7 +196,11 @@ class BrokerMonitor:
     def __init__(self, root):
         self.root = root
         self.root.title("FreeRTOS Network Simulation - Kontrol Paneli")
-        self.root.geometry("980x680")
+        self.root.geometry("1100x720")
+        # Pencerenin cok kucultulup icerigin birbirine girmesini
+        # onlemek icin bir minimum boyut belirliyoruz - bunun
+        # UZERINDE istedigi gibi buyutup kucultebilir.
+        self.root.minsize(760, 480)
 
         notebook = ttk.Notebook(root)
         notebook.pack(fill="both", expand=True)
@@ -200,11 +209,22 @@ class BrokerMonitor:
         control_tab = ttk.Frame(notebook)
         notebook.add(control_tab, text="Kontrol Paneli")
 
-        self.panels = [
-            ProcessPanel(control_tab, "BROKER", "broker", row=0, col=0),
-            ProcessPanel(control_tab, "PUBLISHER", "publisher", row=0, col=1),
-            ProcessPanel(control_tab, "SUBSCRIBER", "subscriber", row=0, col=2),
-        ]
+        # PanedWindow: paneller arasina SURUKLENEBILIR ayraclar koyar.
+        # Kullanici, iki panel arasindaki cizgiyi fare ile tutup
+        # cekerek birini buyutup digerini kucultebilir - sabit grid
+        # hucreleri yerine, tamamen ayarlanabilir bir duzen.
+        paned = ttk.PanedWindow(control_tab, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
+
+        self.panels = []
+        for title, role in (("BROKER", "broker"),
+                             ("PUBLISHER", "publisher"),
+                             ("SUBSCRIBER", "subscriber")):
+            panel = ProcessPanel(paned, title, role)
+            # weight=1: pencere yeniden boyutlandirildiginda, bu
+            # bolmenin de orantili olarak buyuyup kuculmesini saglar.
+            paned.add(panel.frame, weight=1)
+            self.panels.append(panel)
 
         # --- SEKME 2: Canli Izleme (broker'a subscriber gibi baglanan izleyici) ---
         monitor_tab = ttk.Frame(notebook)
@@ -234,16 +254,31 @@ class BrokerMonitor:
 
         self.values = deque(maxlen=MAX_POINTS)
 
-        chart_frame = ttk.LabelFrame(root, text="Sensor Verisi (sensor/sicaklik)", padding=5)
-        chart_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Dikey PanedWindow: grafik alani ile log alani arasina
+        # SURUKLENEBILIR bir ayrac koyuyoruz - kullanici, grafige mi
+        # yoksa log'a mi daha fazla yer ayirmak istedigine gore bu
+        # sinirlari fare ile ayarlayabiliyor.
+        v_paned = ttk.PanedWindow(root, orient="vertical")
+        v_paned.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        chart_frame = ttk.LabelFrame(v_paned, text="Sensor Verisi (sensor/sicaklik)", padding=5)
+        v_paned.add(chart_frame, weight=3)
 
         self.canvas = tk.Canvas(chart_frame, bg="white", height=250)
         self.canvas.pack(fill="both", expand=True)
 
-        log_frame = ttk.LabelFrame(root, text="Son Mesajlar", padding=5)
-        log_frame.pack(fill="x", padx=10, pady=(0, 10))
-        self.log_text = tk.Text(log_frame, height=6, font=("Consolas", 9))
-        self.log_text.pack(fill="x")
+        log_frame = ttk.LabelFrame(v_paned, text="Son Mesajlar", padding=5)
+        v_paned.add(log_frame, weight=1)
+
+        log_wrapper = ttk.Frame(log_frame)
+        log_wrapper.pack(fill="both", expand=True)
+
+        self.log_text = tk.Text(log_wrapper, height=6, font=("Consolas", 9), wrap="none")
+        self.log_text.pack(side="left", fill="both", expand=True)
+
+        log_scrollbar = ttk.Scrollbar(log_wrapper, command=self.log_text.yview)
+        log_scrollbar.pack(side="right", fill="y")
+        self.log_text.configure(yscrollcommand=log_scrollbar.set)
 
     def _log(self, mesaj):
         def _append():

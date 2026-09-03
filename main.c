@@ -318,6 +318,20 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
  * TASK IMPLEMENTASYONLARI 
  * ===================================================================== */
 
+/* Task durumunu insan okunur metne ceviren yardimci fonksiyon. */
+static const char * prvTaskDurumuStr( eTaskState eDurum )
+{
+    switch( eDurum )
+    {
+        case eRunning:   return "CALISIYOR";
+        case eReady:     return "HAZIR";
+        case eBlocked:   return "BLOKE";
+        case eSuspended: return "SUSPEND";
+        case eDeleted:   return "SILINMIS";
+        default:         return "BILINMIYOR";
+    }
+}
+
 static void vHealthTask( void *pvParameters )
 {
     ( void ) pvParameters;
@@ -325,12 +339,86 @@ static void vHealthTask( void *pvParameters )
 
     for( ;; )
     {
-        printf( "[Health] Sistem kontrolu yapiliyor... "
-                "(bos heap: %u byte)\n",
-                ( unsigned int ) xPortGetFreeHeapSize() );
+        /* --- 1) HEAP ANALIZI --- */
+        size_t bosHeap    = xPortGetFreeHeapSize();
+        size_t minBosHeap = xPortGetMinimumEverFreeHeapSize();
+        int dolulukYuzdesi = (int)( 100 - ( bosHeap * 100 / configTOTAL_HEAP_SIZE ) );
 
+        printf( "\n[Health] ===== SISTEM SAGLIK RAPORU =====\n" );
+        printf( "[Health] Heap: %u byte bos / %u toplam (doluluk: %%%d)\n",
+                (unsigned int) bosHeap,
+                (unsigned int) configTOTAL_HEAP_SIZE,
+                dolulukYuzdesi );
+        printf( "[Health] Heap en dusuk seviye: %u byte (leak gostergesi: surekli dusuyorsa sizinti var)\n",
+                (unsigned int) minBosHeap );
 
-        vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( 1000 ) );
+        /* --- 2) TASK ANALIZI: durum + stack high water mark --- */
+        UBaseType_t uxTaskSayisi = uxTaskGetNumberOfTasks();
+        TaskStatus_t *pxDurumlar = pvPortMalloc( uxTaskSayisi * sizeof( TaskStatus_t ) );
+
+        if( pxDurumlar != NULL )
+        {
+            UBaseType_t uxAlinan = uxTaskGetSystemState( pxDurumlar, uxTaskSayisi, NULL );
+
+            printf( "[Health] %-18s %-10s %s\n", "TASK", "DURUM", "STACK BOS (word)" );
+            for( UBaseType_t i = 0; i < uxAlinan; i++ )
+            {
+                printf( "[Health] %-18s %-10s %u\n",
+                        pxDurumlar[ i ].pcTaskName,
+                        prvTaskDurumuStr( pxDurumlar[ i ].eCurrentState ),
+                        (unsigned int) pxDurumlar[ i ].usStackHighWaterMark );
+
+                /* Stack tasmasina yaklasan task'lari OZEL OLARAK uyar. */
+                if( pxDurumlar[ i ].usStackHighWaterMark < 50 )
+                {
+                    printf( "[Health] !!! UYARI: '%s' task'inin stack'i tasma sinirina yaklasiyor!\n",
+                            pxDurumlar[ i ].pcTaskName );
+                }
+            }
+
+            vPortFree( pxDurumlar );
+        }
+        printf( "[Health] =================================\n\n" );
+        /* --- HEALTH VERISINI JSON OLARAK YAYINLA (sadece BROKER'da,
+        * subscriber'lar varsa) --- */
+        if( xMyRole == ROLE_BROKER && xSubscriberListMutex != NULL )
+        {
+            if( xSemaphoreTake( xSubscriberListMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
+            {
+                cJSON *healthRoot = cJSON_CreateObject();
+                cJSON_AddStringToObject( healthRoot, "topic", "system/health" );
+
+                /* payload'i tek bir JSON string olarak paketliyoruz -
+                * boylece mevcut {"topic":"...","payload":"..."} formatina
+                * uyumlu kaliyoruz, subscriber tarafinda ek bir ayristirma
+                * mantigi degistirmemize gerek kalmiyor. */
+                char payloadStr[ 128 ];
+                snprintf( payloadStr, sizeof( payloadStr ),
+                        "heap:%u,min_heap:%u,doluluk:%%%d,task_sayisi:%u",
+                        (unsigned int) bosHeap,
+                        (unsigned int) minBosHeap,
+                        dolulukYuzdesi,
+                        (unsigned int) uxTaskSayisi );
+
+                cJSON_AddStringToObject( healthRoot, "payload", payloadStr );
+
+                char *healthJson = cJSON_PrintUnformatted( healthRoot );
+                char gonderilecek[ 256 ];
+                snprintf( gonderilecek, sizeof( gonderilecek ), "%s\n", healthJson );
+
+                for( int i = 0; i < xSubscriberCount; i++ )
+                {
+                    send( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ), 0 );
+                }
+
+                cJSON_free( healthJson );
+                cJSON_Delete( healthRoot );
+
+                xSemaphoreGive( xSubscriberListMutex );
+            }
+        }
+
+        vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( 5000 ) );
     }
 }
 
