@@ -388,6 +388,10 @@ static void vHealthTask( void *pvParameters )
         size_t bosHeap    = xPortGetFreeHeapSize();
         size_t minBosHeap = xPortGetMinimumEverFreeHeapSize();
         int dolulukYuzdesi = (int)( 100 - ( bosHeap * 100 / configTOTAL_HEAP_SIZE ) );
+        /* Zaman damgasini BURADA, tum printf'lerden ONCE yakaliyoruz -
+        * boylece olcum, sadece "ag + islem" gecikmesini yansitir,
+        * konsol yazma suresini DEGIL. */
+        
 
         printf( "\n[Health] ===== SISTEM SAGLIK RAPORU =====\n" );
         printf( "[Health] Heap: %u byte bos / %u toplam (doluluk: %%%d)\n",
@@ -430,6 +434,7 @@ static void vHealthTask( void *pvParameters )
         {
             if( xSemaphoreTake( xSubscriberListMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
             {
+                unsigned long long xOlcumZamani = (unsigned long long) GetTickCount64();
                 cJSON *healthRoot = cJSON_CreateObject();
                 cJSON_AddStringToObject( healthRoot, "topic", "system/health" );
 
@@ -437,13 +442,14 @@ static void vHealthTask( void *pvParameters )
                 * boylece mevcut {"topic":"...","payload":"..."} formatina
                 * uyumlu kaliyoruz, subscriber tarafinda ek bir ayristirma
                 * mantigi degistirmemize gerek kalmiyor. */
-                char payloadStr[ 128 ];
+                char payloadStr[ 160 ];  /* ts alani icin buyuttuk */
                 snprintf( payloadStr, sizeof( payloadStr ),
-                        "heap:%u,min_heap:%u,doluluk:%%%d,task_sayisi:%u",
-                        (unsigned int) bosHeap,
-                        (unsigned int) minBosHeap,
-                        dolulukYuzdesi,
-                        (unsigned int) uxTaskSayisi );
+                "heap:%u,min_heap:%u,doluluk:%%%d,task_sayisi:%u,ts:%llu",
+                (unsigned int) bosHeap,
+                (unsigned int) minBosHeap,
+                dolulukYuzdesi,
+                (unsigned int) uxTaskSayisi,
+                xOlcumZamani );   /* <-- artik erken alinan zamani kullaniyoruz */
 
                 cJSON_AddStringToObject( healthRoot, "payload", payloadStr );
 
@@ -460,6 +466,10 @@ static void vHealthTask( void *pvParameters )
                 cJSON_Delete( healthRoot );
 
                 xSemaphoreGive( xSubscriberListMutex );
+            }
+            else
+            {
+                printf( "[Health] UYARI: Health verisi icin mutex 100ms icinde alinamadi, bu tur atlaniyor.\n" );
             }
         }
 
@@ -716,6 +726,30 @@ static void vNetworkTask( void *pvParameters )
                                 {
                                     printf( "[Network] UYARI: Veri Internal Comm queue'suna gonderilemedi.\n" );
                                 }
+                                /* --- CROSS-INSTANCE HEALTH PERFORMANS OLCUMU ---
+                                * Eger bu bir health mesajiysa, icindeki "ts:" alanini bulup
+                                * kendi zaman damgamizla karsilastirarak GECIKME (latency)
+                                * hesapliyoruz. Bu,"farkli instance'larin
+                                * birbiriyle dis haberlesme performansi" olcumudur. */
+                                if( strcmp( topicItem->valuestring, "system/health" ) == 0 )
+                                {
+                                    const char *tsAlani = strstr( payloadItem->valuestring, "ts:" );
+
+                                    if( tsAlani != NULL )
+                                    {
+                                        unsigned long long uzakZaman = strtoull( tsAlani + 3, NULL, 10 );
+                                        unsigned long long yerelZaman = (unsigned long long) GetTickCount64();
+
+                                        /* NOT: Bu hesaplama, sadece iki instance AYNI FIZIKSEL
+                                        * MAKINEDE calisirken anlamlidir - cunku GetTickCount64()
+                                        * "bu bilgisayar acildigindan beri gecen sure"dir, farkli
+                                        * makinelerde senkronize degildir. */
+                                        long long gecikmeMs = (long long) ( yerelZaman - uzakZaman );
+
+                                        printf( "[HealthPeer] Uzak instance'in health verisi %lld ms'de ulasti.\n",
+                                                gecikmeMs );
+                                    }
+                                }   
                             }
                             else
                             {
