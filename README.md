@@ -107,10 +107,38 @@ Sistem, veri taşımak için JSON formatını kullanır. Her mesajın sonuna, me
 
 **Sistem sağlığı (`system/health`, 5 saniyede bir):**
 ```json
-{"topic":"system/health","payload":"heap:485040,min_heap:484592,doluluk:%4,task_sayisi:6,ts:1204982"}
+{"topic":"system/health","payload":{"heap":485040,"min_heap":484592,"doluluk":4,"task_sayisi":6,"ts":1204982}}
 ```
 
+`payload`, diğer topic'lerin aksine (`sensor/sicaklik`, `system/status`) düz string değil, **gerçek nested bir JSON nesnesidir** — heap, min_heap, doluluk, task_sayisi ve zaman damgası (`ts`) ayrı ayrı, doğru tipleriyle taşınır.
+
 Broker ve subscriber, gelen JSON verisini `cJSON_Parse()` ile ayrıştırıp `topic`/`payload` alanlarının varlığını ve tipini doğrular; geçersiz veya eksik veriler işlenmeden reddedilir.
+
+## MQTT'den Bağımsız İletişim Kanalı
+
+Sistemin tek bir protokole bağımlı olmadığını göstermek amacıyla, **her rolde** çalışan ayrı bir görev (`vUdpCommandTask`), TCP/JSON/authentication altyapısından tamamen bağımsız olarak, **UDP** üzerinden **düz metin komutlar** kabul eder. Ana TCP portunun `+1000`'i üzerinde dinler (örn. broker `8080` çalışıyorsa, UDP kanalı `9080`'de).
+
+| Komut | Cevap | Açıklama |
+|---|---|---|
+| `PING` | `PONG` | Canlılık kontrolü |
+| `HEAP` | `HEAP:<byte>` | Anlık boş heap miktarı |
+| `STATUS` | `ROLE:<n>,TASKS:<n>` | Rol ve görev sayısı |
+
+**Test (PowerShell):**
+```powershell
+$udp = New-Object System.Net.Sockets.UdpClient
+$udp.Connect("127.0.0.1", 9080)
+$bytes = [System.Text.Encoding]::ASCII.GetBytes("PING")
+$udp.Send($bytes, $bytes.Length)
+$remoteEP = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+$response = $udp.Receive([ref]$remoteEP)
+[System.Text.Encoding]::ASCII.GetString($response)
+$udp.Close()
+```
+
+## Idle-Timeout ile Otomatik Kapanma
+
+Broker, belirlenen bir süre boyunca (varsayılan 30 saniye, `IDLE_TIMEOUT_MS` ile ayarlanabilir) hiç yeni bağlantı kabul etmezse, kendini düzgün bir şekilde kapatır. Bu özellik geliştirilirken, FreeRTOS'un `vTaskEndScheduler()` fonksiyonunun Windows Simulator portunda **tam olarak çalışmadığı** (bazı görevlerin, port her FreeRTOS task'ını gerçek bir Windows thread'i olarak çalıştırdığı için, scheduler durdurulsa dahi çalışmaya devam ettiği) tespit edilmiş; bunun yerine `exit()` ile doğrudan process sonlandırma kullanılmıştır.
 
 ## Gerçek Veri Seti
 
@@ -142,16 +170,19 @@ Dosya bulunamazsa, sistem otomatik olarak eski (rastgele) veri üretim yöntemin
 - [x] Instance'lar arası health veri gecikmesi ölçümü (~100-125 ms, aynı makinede)
 - [x] Python/Tkinter görsel kontrol paneli (süreç yönetimi + canlı izleme)
 - [x] Gerçek, kaynaklı bir veri setinden sensör verisi üretimi
+- [x] MQTT/TCP/JSON altyapısından bağımsız UDP komut kanalı (PING/HEAP/STATUS)
+- [x] Broker'ın idle-timeout ile kendini düzgün şekilde kapatabilmesi
 
 ## Bilinen Kısıtlamalar
 
 FreeRTOS Windows Simulator portu, gerçekçi tek-çekirdekli zamanlama sağlamak amacıyla her görev iş parçacığını `SetThreadAffinityMask()` ile CPU'nun 0. çekirdeğine sabitlemekte ve işlem önceliğini `REALTIME_PRIORITY_CLASS` olarak ayarlamaktadır. Bu, **aynı fiziksel makinede birden fazla instance'ın eş zamanlı çalıştırılmasını** sınırlamaktadır (instance'lar aynı çekirdek için rekabet eder). Bu davranış, gerçek donanımda (her cihazın kendi bağımsız işlemcisine sahip olduğu bir senaryoda, örn. ESP32) yaşanmayacaktır; çoklu instance testleri farklı fiziksel makinelerde/VM'lerde sorunsuz çalışır.
 
+Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak çalıştırması nedeniyle, `vTaskEndScheduler()` çağrısı sistemi tam olarak durduramamaktadır (Timer Service task'ı silinse de, diğer görevler kendi Windows thread'lerinde çalışmaya devam edebilir). Bu nedenle idle-timeout özelliği, `exit()` ile doğrudan process sonlandırma kullanmaktadır.
+
 ## Yol Haritası
 
 - [ ] ESP32'ye taşınabilirlik (network katmanının soyutlanması)
 - [ ] Gerçek zamanlı bir hava durumu API'sinden canlı veri çekme
-- [ ] Stack boyutu deneyleri, idle-timeout timer, MQTT'den bağımsız haberleşme kanalı
 
 ## Proje Yapısı
 
