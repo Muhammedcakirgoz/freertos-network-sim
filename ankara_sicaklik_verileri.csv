@@ -1,28 +1,1023 @@
-tarih,sicaklik,nem
-2026-03-26,5.5,83
-2026-03-26,7.4,64
-2026-03-26,8.8,58
-2026-03-26,9.0,59
-2026-03-26,5.7,73
-2026-03-26,2.8,84
-2026-03-27,0.7,92
-2026-03-27,0.2,93
-2026-03-27,3.5,82
-2026-03-27,11.3,57
-2026-03-27,14.5,38
-2026-03-27,14.8,37
-2026-03-27,9.0,66
-2026-03-27,5.3,79
-2026-03-28,2.8,88
-2026-03-28,1.5,90
-2026-08-04,25.0,40
-2026-08-05,24.0,36
-2026-08-26,25.0,32
-2026-08-27,26.0,34
-2026-08-28,25.0,28
-2026-04-15,10.3,56
-2026-05-15,15.3,50
-2026-06-15,19.5,46
-2026-07-15,23.2,38
-2026-08-15,23.3,38
-2026-09-15,18.8,41
+sehir,tarih,sicaklik,durum
+Istanbul,2024-11-15,13.0,Orta kuvvetli yagmurlu
+Istanbul,2024-11-16,11.1,Bolgesel duzensiz yagmur yagisli
+Istanbul,2024-11-17,12.0,Parcali Bulutlu
+Istanbul,2024-11-18,12.0,Cok bulutlu
+Istanbul,2024-11-19,11.9,Gunesli
+Istanbul,2024-11-20,13.2,Bulutlu
+Istanbul,2024-11-21,16.0,Bolgesel duzensiz yagmur yagisli
+Istanbul,2024-11-22,11.1,Parcali Bulutlu
+Istanbul,2024-11-23,8.8,Bolgesel duzensiz yagmur yagisli
+Istanbul,2024-11-24,8.3,Gunesli
+Istanbul,2024-11-25,10.3,Gunesli
+Istanbul,2024-11-26,11.4,Gunesli
+Istanbul,2024-11-27,12.0,Gunesli
+Istanbul,2024-11-28,12.7,Parcali Bulutlu
+Ankara,2024-11-15,9.6,Parcali Bulutlu
+Ankara,2024-11-16,8.2,Bolgesel duzensiz yagmur yagisli
+Ankara,2024-11-17,7.3,Bolgesel duzensiz yagmur yagisli
+Ankara,2024-11-18,8.4,Bolgesel duzensiz yagmur yagisli
+Ankara,2024-11-19,7.5,Bolgesel duzensiz yagmur yagisli
+Ankara,2024-11-20,7.3,Gunesli
+Ankara,2024-11-21,10.1,Bulutlu
+Ankara,2024-11-22,12.2,Bolgesel duzensiz yagmur yagisli
+Ankara,2024-11-23,7.9,Bolgesel duzensiz yagmur yagisli
+Ankara,2024-11-24,4.0,Gunesli
+Ankara,2024-11-25,7.4,Gunesli
+Ankara,2024-11-26,8.5,Gunesli
+Ankara,2024-11-27,9.3,Cok bulutlu
+Ankara,2024-11-28,11.0,Gunesli
+Izmir,2024-11-15,15.6,Bolgesel duzensiz yagmur yagisli
+Izmir,2024-11-16,12.4,Orta kuvvetli yagmurlu
+Izmir,2024-11-17,12.1,Bolgesel duzensiz yagmur yagisli
+Izmir,2024-11-18,11.8,Gunesli
+Izmir,2024-11-19,11.8,Gunesli
+Izmir,2024-11-20,11.7,Parcali Bulutlu
+Izmir,2024-11-21,16.3,Bolgesel duzensiz yagmur yagisli
+Izmir,2024-11-22,15.7,Bolgesel duzensiz yagmur yagisli
+Izmir,2024-11-23,13.9,Bolgesel duzensiz yagmur yagisli
+Izmir,2024-11-24,10.7,Gunesli
+Izmir,2024-11-25,12.1,Gunesli
+Izmir,2024-11-26,12.8,Gunesli
+Izmir,2024-11-27,12.7,Gunesli
+Izmir,2024-11-28,13.0,Gunesli
+Bursa,2024-11-15,11.4,Orta kuvvetli yagmurlu
+Bursa,2024-11-16,9.5,Bolgesel duzensiz yagmur yagisli
+Bursa,2024-11-17,9.3,Bolgesel duzensiz yagmur yagisli
+Bursa,2024-11-18,9.7,Bulutlu
+Bursa,2024-11-19,9.9,Gunesli
+Bursa,2024-11-20,10.7,Parcali Bulutlu
+Bursa,2024-11-21,15.1,Bolgesel duzensiz yagmur yagisli
+Bursa,2024-11-22,10.9,Bolgesel duzensiz yagmur yagisli
+Bursa,2024-11-23,7.1,Bolgesel duzensiz yagmur yagisli
+Bursa,2024-11-24,5.9,Gunesli
+Bursa,2024-11-25,8.5,Gunesli
+Bursa,2024-11-26,9.3,Gunesli
+Bursa,2024-11-27,10.2,Gunesli
+Bursa,2024-11-28,11.0,Gunesli
+Antalya,2024-11-15,17.0,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-16,16.7,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-17,14.7,Siddetli yagmurlu
+Antalya,2024-11-18,15.4,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-19,15.2,Gunesli
+Antalya,2024-11-20,14.0,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-21,14.0,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-22,15.9,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-23,16.5,Bolgesel duzensiz yagmur yagisli
+Antalya,2024-11-24,16.6,Gunesli
+Antalya,2024-11-25,17.1,Gunesli
+Antalya,2024-11-26,17.4,Parcali Bulutlu
+Antalya,2024-11-27,16.9,Parcali Bulutlu
+Antalya,2024-11-28,16.3,Parcali Bulutlu
+Adana,2024-11-15,17.6,Bolgesel duzensiz yagmur yagisli
+Adana,2024-11-16,17.5,Bolgesel duzensiz yagmur yagisli
+Adana,2024-11-17,15.2,Siddetli yagmurlu
+Adana,2024-11-18,13.4,Siddetli yagmurlu
+Adana,2024-11-19,15.1,Gunesli
+Adana,2024-11-20,14.6,Parcali Bulutlu
+Adana,2024-11-21,16.2,Gunesli
+Adana,2024-11-22,15.7,Bolgesel duzensiz yagmur yagisli
+Adana,2024-11-23,16.0,Bolgesel duzensiz yagmur yagisli
+Adana,2024-11-24,17.7,Gunesli
+Adana,2024-11-25,18.1,Gunesli
+Adana,2024-11-26,18.1,Parcali Bulutlu
+Adana,2024-11-27,18.4,Gunesli
+Adana,2024-11-28,17.8,Bolgesel duzensiz yagmur yagisli
+Konya,2024-11-15,11.0,Gunesli
+Konya,2024-11-16,10.3,Bolgesel duzensiz yagmur yagisli
+Konya,2024-11-17,9.7,Orta kuvvetli yagmurlu
+Konya,2024-11-18,9.4,Bolgesel duzensiz yagmur yagisli
+Konya,2024-11-19,8.9,Bolgesel duzensiz yagmur yagisli
+Konya,2024-11-20,7.3,Gunesli
+Konya,2024-11-21,8.9,Gunesli
+Konya,2024-11-22,9.6,Bulutlu
+Konya,2024-11-23,10.4,Parcali Bulutlu
+Konya,2024-11-24,8.0,Parcali Bulutlu
+Konya,2024-11-25,8.3,Gunesli
+Konya,2024-11-26,8.6,Gunesli
+Konya,2024-11-27,9.8,Parcali Bulutlu
+Konya,2024-11-28,10.3,Gunesli
+Gaziantep,2024-11-15,13.3,Gunesli
+Gaziantep,2024-11-16,13.0,Gunesli
+Gaziantep,2024-11-17,11.0,Orta kuvvetli yagmurlu
+Gaziantep,2024-11-18,9.5,Siddetli yagmurlu
+Gaziantep,2024-11-19,10.3,Gunesli
+Gaziantep,2024-11-20,10.4,Bolgesel duzensiz yagmur yagisli
+Gaziantep,2024-11-21,11.3,Bolgesel duzensiz yagmur yagisli
+Gaziantep,2024-11-22,11.6,Parcali Bulutlu
+Gaziantep,2024-11-23,12.6,Parcali Bulutlu
+Gaziantep,2024-11-24,13.1,Gunesli
+Gaziantep,2024-11-25,13.4,Gunesli
+Gaziantep,2024-11-26,13.4,Gunesli
+Gaziantep,2024-11-27,13.0,Gunesli
+Gaziantep,2024-11-28,12.8,Gunesli
+Mersin,2024-11-15,17.8,Bolgesel duzensiz yagmur yagisli
+Mersin,2024-11-16,17.8,Bolgesel duzensiz yagmur yagisli
+Mersin,2024-11-17,16.4,Siddetli yagmurlu
+Mersin,2024-11-18,14.8,Orta kuvvetli yagmurlu
+Mersin,2024-11-19,15.9,Gunesli
+Mersin,2024-11-20,15.9,Bolgesel duzensiz yagmur yagisli
+Mersin,2024-11-21,16.8,Bolgesel duzensiz yagmur yagisli
+Mersin,2024-11-22,16.8,Bolgesel duzensiz yagmur yagisli
+Mersin,2024-11-23,16.8,Bolgesel duzensiz yagmur yagisli
+Mersin,2024-11-24,18.1,Gunesli
+Mersin,2024-11-25,19.0,Gunesli
+Mersin,2024-11-26,19.3,Gunesli
+Mersin,2024-11-27,19.2,Gunesli
+Mersin,2024-11-28,18.8,Parcali Bulutlu
+Kayseri,2024-11-15,10.1,Parcali Bulutlu
+Kayseri,2024-11-16,8.8,Bolgesel duzensiz yagmur yagisli
+Kayseri,2024-11-17,8.9,Bolgesel duzensiz yagmur yagisli
+Kayseri,2024-11-18,8.6,Orta kuvvetli yagmurlu
+Kayseri,2024-11-19,8.2,Bolgesel duzensiz yagmur yagisli
+Kayseri,2024-11-20,6.5,Gunesli
+Kayseri,2024-11-21,8.9,Gunesli
+Kayseri,2024-11-22,10.1,Bolgesel duzensiz yagmur yagisli
+Kayseri,2024-11-23,10.8,Bolgesel duzensiz yagmur yagisli
+Kayseri,2024-11-24,8.1,Gunesli
+Kayseri,2024-11-25,7.6,Gunesli
+Kayseri,2024-11-26,7.8,Gunesli
+Kayseri,2024-11-27,8.7,Parcali Bulutlu
+Kayseri,2024-11-28,9.3,Gunesli
+Samsun,2024-11-15,11.8,Bolgesel duzensiz yagmur yagisli
+Samsun,2024-11-16,9.5,Orta kuvvetli yagmurlu
+Samsun,2024-11-17,9.3,Gunesli
+Samsun,2024-11-18,11.7,Bolgesel duzensiz yagmur yagisli
+Samsun,2024-11-19,10.2,Bolgesel duzensiz yagmur yagisli
+Samsun,2024-11-20,10.4,Gunesli
+Samsun,2024-11-21,14.8,Gunesli
+Samsun,2024-11-22,11.8,Bolgesel duzensiz yagmur yagisli
+Samsun,2024-11-23,11.1,Bolgesel duzensiz yagmur yagisli
+Samsun,2024-11-24,7.3,Gunesli
+Samsun,2024-11-25,9.1,Gunesli
+Samsun,2024-11-26,8.7,Gunesli
+Samsun,2024-11-27,10.4,Gunesli
+Samsun,2024-11-28,11.5,Gunesli
+Trabzon,2024-11-15,13.2,Parcali Bulutlu
+Trabzon,2024-11-16,12.0,Siddetli yagmurlu
+Trabzon,2024-11-17,10.3,Bolgesel duzensiz yagmur yagisli
+Trabzon,2024-11-18,14.0,Bolgesel duzensiz yagmur yagisli
+Trabzon,2024-11-19,12.7,Orta kuvvetli yagmurlu
+Trabzon,2024-11-20,11.6,Gunesli
+Trabzon,2024-11-21,15.4,Gunesli
+Trabzon,2024-11-22,13.8,Bulutlu
+Trabzon,2024-11-23,14.1,Orta kuvvetli yagmurlu
+Trabzon,2024-11-24,8.6,Bolgesel duzensiz yagmur yagisli
+Trabzon,2024-11-25,10.4,Gunesli
+Trabzon,2024-11-26,10.4,Gunesli
+Trabzon,2024-11-27,11.4,Gunesli
+Trabzon,2024-11-28,12.9,Gunesli
+Eskisehir,2024-11-15,10.3,Bolgesel duzensiz yagmur yagisli
+Eskisehir,2024-11-16,8.3,Bolgesel duzensiz yagmur yagisli
+Eskisehir,2024-11-17,7.9,Bolgesel duzensiz yagmur yagisli
+Eskisehir,2024-11-18,8.9,Parcali Bulutlu
+Eskisehir,2024-11-19,8.3,Gunesli
+Eskisehir,2024-11-20,7.9,Gunesli
+Eskisehir,2024-11-21,12.1,Gunesli
+Eskisehir,2024-11-22,11.9,Bolgesel duzensiz yagmur yagisli
+Eskisehir,2024-11-23,5.9,Bolgesel duzensiz yagmur yagisli
+Eskisehir,2024-11-24,4.6,Gunesli
+Eskisehir,2024-11-25,8.1,Gunesli
+Eskisehir,2024-11-26,9.4,Gunesli
+Eskisehir,2024-11-27,10.6,Cok bulutlu
+Eskisehir,2024-11-28,10.7,Gunesli
+Denizli,2024-11-15,12.2,Parcali Bulutlu
+Denizli,2024-11-16,11.0,Bolgesel duzensiz yagmur yagisli
+Denizli,2024-11-17,11.0,Bolgesel duzensiz yagmur yagisli
+Denizli,2024-11-18,10.1,Bolgesel duzensiz yagmur yagisli
+Denizli,2024-11-19,10.0,Gunesli
+Denizli,2024-11-20,7.1,Gunesli
+Denizli,2024-11-21,10.9,Bolgesel duzensiz yagmur yagisli
+Denizli,2024-11-22,14.1,Bolgesel duzensiz yagmur yagisli
+Denizli,2024-11-23,14.3,Bolgesel duzensiz yagmur yagisli
+Denizli,2024-11-24,11.3,Gunesli
+Denizli,2024-11-25,10.1,Gunesli
+Denizli,2024-11-26,10.9,Gunesli
+Denizli,2024-11-27,11.2,Gunesli
+Denizli,2024-11-28,9.7,Gunesli
+Sanliurfa,2024-11-15,15.5,Gunesli
+Sanliurfa,2024-11-16,15.0,Parcali Bulutlu
+Sanliurfa,2024-11-17,15.2,Bolgesel duzensiz yagmur yagisli
+Sanliurfa,2024-11-18,14.2,Orta kuvvetli yagmurlu
+Sanliurfa,2024-11-19,12.7,Gunesli
+Sanliurfa,2024-11-20,12.2,Gunesli
+Sanliurfa,2024-11-21,13.6,Parcali Bulutlu
+Sanliurfa,2024-11-22,13.9,Parcali Bulutlu
+Sanliurfa,2024-11-23,15.3,Parcali Bulutlu
+Sanliurfa,2024-11-24,15.0,Gunesli
+Sanliurfa,2024-11-25,14.8,Gunesli
+Sanliurfa,2024-11-26,15.0,Gunesli
+Sanliurfa,2024-11-27,14.5,Gunesli
+Sanliurfa,2024-11-28,14.5,Gunesli
+Diyarbakir,2024-11-15,12.7,Gunesli
+Diyarbakir,2024-11-16,12.1,Bolgesel duzensiz yagmur yagisli
+Diyarbakir,2024-11-17,11.8,Bolgesel duzensiz yagmur yagisli
+Diyarbakir,2024-11-18,11.4,Orta kuvvetli yagmurlu
+Diyarbakir,2024-11-19,11.2,Bolgesel duzensiz yagmur yagisli
+Diyarbakir,2024-11-20,11.3,Parcali Bulutlu
+Diyarbakir,2024-11-21,11.9,Gunesli
+Diyarbakir,2024-11-22,11.9,Bolgesel duzensiz yagmur yagisli
+Diyarbakir,2024-11-23,13.3,Parcali Bulutlu
+Diyarbakir,2024-11-24,13.1,Gunesli
+Diyarbakir,2024-11-25,12.6,Gunesli
+Diyarbakir,2024-11-26,13.0,Gunesli
+Diyarbakir,2024-11-27,12.8,Gunesli
+Diyarbakir,2024-11-28,12.9,Gunesli
+Balikesir,2024-11-15,12.6,Bolgesel duzensiz yagmur yagisli
+Balikesir,2024-11-16,10.5,Bolgesel duzensiz yagmur yagisli
+Balikesir,2024-11-17,9.8,Bolgesel duzensiz yagmur yagisli
+Balikesir,2024-11-18,10.2,Bulutlu
+Balikesir,2024-11-19,10.2,Gunesli
+Balikesir,2024-11-20,10.5,Parcali Bulutlu
+Balikesir,2024-11-21,16.2,Bolgesel duzensiz yagmur yagisli
+Balikesir,2024-11-22,12.4,Bolgesel duzensiz yagmur yagisli
+Balikesir,2024-11-23,8.2,Bolgesel duzensiz yagmur yagisli
+Balikesir,2024-11-24,5.8,Gunesli
+Balikesir,2024-11-25,8.3,Gunesli
+Balikesir,2024-11-26,9.7,Gunesli
+Balikesir,2024-11-27,11.2,Gunesli
+Balikesir,2024-11-28,12.4,Gunesli
+Aydin,2024-11-15,14.5,Bolgesel duzensiz yagmur yagisli
+Aydin,2024-11-16,13.0,Orta kuvvetli yagmurlu
+Aydin,2024-11-17,13.6,Orta kuvvetli yagmurlu
+Aydin,2024-11-18,11.8,Parcali Bulutlu
+Aydin,2024-11-19,11.4,Gunesli
+Aydin,2024-11-20,10.9,Parcali Bulutlu
+Aydin,2024-11-21,13.6,Bolgesel duzensiz yagmur yagisli
+Aydin,2024-11-22,15.0,Bolgesel duzensiz yagmur yagisli
+Aydin,2024-11-23,14.0,Bolgesel duzensiz yagmur yagisli
+Aydin,2024-11-24,11.2,Gunesli
+Aydin,2024-11-25,13.1,Gunesli
+Aydin,2024-11-26,10.6,Gunesli
+Aydin,2024-11-27,13.6,Gunesli
+Aydin,2024-11-28,13.7,Gunesli
+Manisa,2024-11-15,15.6,Bolgesel duzensiz yagmur yagisli
+Manisa,2024-11-16,12.1,Orta kuvvetli yagmurlu
+Manisa,2024-11-17,11.9,Bolgesel duzensiz yagmur yagisli
+Manisa,2024-11-18,11.2,Parcali Bulutlu
+Manisa,2024-11-19,11.0,Gunesli
+Manisa,2024-11-20,10.4,Parcali Bulutlu
+Manisa,2024-11-21,15.4,Bolgesel duzensiz yagmur yagisli
+Manisa,2024-11-22,15.2,Bolgesel duzensiz yagmur yagisli
+Manisa,2024-11-23,12.5,Bolgesel duzensiz yagmur yagisli
+Manisa,2024-11-24,9.8,Gunesli
+Manisa,2024-11-25,11.5,Gunesli
+Manisa,2024-11-26,12.3,Gunesli
+Manisa,2024-11-27,12.9,Gunesli
+Manisa,2024-11-28,12.5,Gunesli
+Tekirdag,2024-11-15,10.9,Bolgesel duzensiz yagmur yagisli
+Tekirdag,2024-11-16,9.5,Bolgesel duzensiz yagmur yagisli
+Tekirdag,2024-11-17,10.0,Parcali Bulutlu
+Tekirdag,2024-11-18,10.7,Gunesli
+Tekirdag,2024-11-19,10.4,Parcali Bulutlu
+Tekirdag,2024-11-20,11.9,Parcali Bulutlu
+Tekirdag,2024-11-21,15.0,Bolgesel duzensiz yagmur yagisli
+Tekirdag,2024-11-22,9.7,Gunesli
+Tekirdag,2024-11-23,8.0,Bolgesel duzensiz yagmur yagisli
+Tekirdag,2024-11-24,6.7,Gunesli
+Tekirdag,2024-11-25,8.3,Gunesli
+Tekirdag,2024-11-26,9.5,Gunesli
+Tekirdag,2024-11-27,10.4,Gunesli
+Tekirdag,2024-11-28,12.1,Parcali Bulutlu
+Kocaeli,2024-11-15,12.3,Orta kuvvetli yagmurlu
+Kocaeli,2024-11-16,9.8,Orta kuvvetli yagmurlu
+Kocaeli,2024-11-17,9.3,Parcali Bulutlu
+Kocaeli,2024-11-18,10.0,Cok bulutlu
+Kocaeli,2024-11-19,10.1,Gunesli
+Kocaeli,2024-11-20,11.2,Parcali Bulutlu
+Kocaeli,2024-11-21,16.1,Bolgesel duzensiz yagmur yagisli
+Kocaeli,2024-11-22,9.9,Bolgesel duzensiz yagmur yagisli
+Kocaeli,2024-11-23,7.0,Bolgesel duzensiz yagmur yagisli
+Kocaeli,2024-11-24,6.0,Gunesli
+Kocaeli,2024-11-25,7.9,Gunesli
+Kocaeli,2024-11-26,9.7,Gunesli
+Kocaeli,2024-11-27,10.9,Cok bulutlu
+Kocaeli,2024-11-28,11.8,Gunesli
+Sakarya,2024-11-15,12.7,Orta kuvvetli yagmurlu
+Sakarya,2024-11-16,9.9,Orta kuvvetli yagmurlu
+Sakarya,2024-11-17,8.5,Parcali Bulutlu
+Sakarya,2024-11-18,10.0,Parcali Bulutlu
+Sakarya,2024-11-19,10.0,Gunesli
+Sakarya,2024-11-20,11.1,Gunesli
+Sakarya,2024-11-21,16.3,Bolgesel duzensiz yagmur yagisli
+Sakarya,2024-11-22,9.9,Bolgesel duzensiz yagmur yagisli
+Sakarya,2024-11-23,7.0,Bolgesel duzensiz yagmur yagisli
+Sakarya,2024-11-24,5.9,Gunesli
+Sakarya,2024-11-25,7.8,Gunesli
+Sakarya,2024-11-26,9.8,Gunesli
+Sakarya,2024-11-27,10.8,Cok bulutlu
+Sakarya,2024-11-28,12.0,Gunesli
+Kutahya,2024-11-15,9.4,Bolgesel duzensiz yagmur yagisli
+Kutahya,2024-11-16,7.1,Bolgesel duzensiz yagmur yagisli
+Kutahya,2024-11-17,7.5,Bolgesel duzensiz yagmur yagisli
+Kutahya,2024-11-18,8.4,Bolgesel duzensiz yagmur yagisli
+Kutahya,2024-11-19,7.8,Parcali Bulutlu
+Kutahya,2024-11-20,5.4,Gunesli
+Kutahya,2024-11-21,9.0,Parcali Bulutlu
+Kutahya,2024-11-22,11.9,Bolgesel duzensiz yagmur yagisli
+Kutahya,2024-11-23,6.1,Bolgesel duzensiz yagmur yagisli
+Kutahya,2024-11-24,4.9,Gunesli
+Kutahya,2024-11-25,6.9,Gunesli
+Kutahya,2024-11-26,7.8,Gunesli
+Kutahya,2024-11-27,8.6,Parcali Bulutlu
+Kutahya,2024-11-28,8.4,Gunesli
+Corum,2024-11-15,10.2,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-16,7.9,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-17,6.3,Gunesli
+Corum,2024-11-18,7.1,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-19,7.6,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-20,6.3,Gunesli
+Corum,2024-11-21,10.6,Gunesli
+Corum,2024-11-22,12.4,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-23,9.9,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-24,2.9,Gunesli
+Corum,2024-11-25,6.7,Gunesli
+Corum,2024-11-26,7.2,Gunesli
+Corum,2024-11-27,8.0,Parcali Bulutlu
+Corum,2024-11-28,9.5,Gunesli
+Kirikkale,2024-11-15,11.2,Parcali Bulutlu
+Kirikkale,2024-11-16,8.6,Bolgesel duzensiz yagmur yagisli
+Kirikkale,2024-11-17,5.4,Parcali Bulutlu
+Kirikkale,2024-11-18,7.1,Bolgesel duzensiz yagmur yagisli
+Kirikkale,2024-11-19,7.3,Bolgesel duzensiz yagmur yagisli
+Kirikkale,2024-11-20,6.2,Gunesli
+Kirikkale,2024-11-21,9.7,Gunesli
+Kirikkale,2024-11-22,11.1,Parcali Bulutlu
+Kirikkale,2024-11-23,8.0,Bolgesel duzensiz yagmur yagisli
+Kirikkale,2024-11-24,2.1,Gunesli
+Kirikkale,2024-11-25,4.4,Gunesli
+Kirikkale,2024-11-26,6.0,Gunesli
+Kirikkale,2024-11-27,6.7,Bulutlu
+Kirikkale,2024-11-28,8.9,Gunesli
+Canakkale,2024-11-15,13.0,Bolgesel duzensiz yagmur yagisli
+Canakkale,2024-11-16,10.4,Bolgesel duzensiz yagmur yagisli
+Canakkale,2024-11-17,10.2,Cok bulutlu
+Canakkale,2024-11-18,10.5,Gunesli
+Canakkale,2024-11-19,11.4,Parcali Bulutlu
+Canakkale,2024-11-20,12.4,Parcali Bulutlu
+Canakkale,2024-11-21,16.9,Bolgesel duzensiz yagmur yagisli
+Canakkale,2024-11-22,11.6,Gunesli
+Canakkale,2024-11-23,9.8,Bolgesel duzensiz yagmur yagisli
+Canakkale,2024-11-24,8.1,Gunesli
+Canakkale,2024-11-25,9.8,Gunesli
+Canakkale,2024-11-26,11.0,Gunesli
+Canakkale,2024-11-27,11.6,Parcali Bulutlu
+Canakkale,2024-11-28,12.6,Gunesli
+Elazig,2024-11-15,9.7,Gunesli
+Elazig,2024-11-16,8.1,Bolgesel duzensiz yagmur yagisli
+Elazig,2024-11-17,9.5,Bolgesel duzensiz yagmur yagisli
+Elazig,2024-11-18,9.9,Orta kuvvetli yagmurlu
+Elazig,2024-11-19,9.9,Bolgesel duzensiz yagmur yagisli
+Elazig,2024-11-20,8.3,Parcali Bulutlu
+Elazig,2024-11-21,9.8,Bolgesel duzensiz yagmur yagisli
+Elazig,2024-11-22,10.3,Bolgesel duzensiz yagmur yagisli
+Elazig,2024-11-23,9.8,Parcali Bulutlu
+Elazig,2024-11-24,10.5,Gunesli
+Elazig,2024-11-25,6.9,Gunesli
+Elazig,2024-11-26,7.5,Gunesli
+Elazig,2024-11-27,9.6,Gunesli
+Elazig,2024-11-28,8.5,Gunesli
+Van,2024-11-15,6.5,Gunesli
+Van,2024-11-16,5.3,Gunesli
+Van,2024-11-17,4.4,Bolgesel duzensiz yagmur yagisli
+Van,2024-11-18,4.8,Bolgesel duzensiz yagmur yagisli
+Van,2024-11-19,3.8,Bolgesel duzensiz yagmur yagisli
+Van,2024-11-20,3.5,Bolgesel duzensiz yagmur yagisli
+Van,2024-11-21,3.7,Gunesli
+Van,2024-11-22,4.0,Gunesli
+Van,2024-11-23,5.5,Gunesli
+Van,2024-11-24,6.0,Gunesli
+Van,2024-11-25,6.2,Gunesli
+Van,2024-11-26,5.7,Gunesli
+Van,2024-11-27,5.4,Gunesli
+Van,2024-11-28,4.7,Gunesli
+Mugla,2024-11-15,12.7,Bolgesel duzensiz yagmur yagisli
+Mugla,2024-11-16,11.8,Orta kuvvetli yagmurlu
+Mugla,2024-11-17,10.8,Orta kuvvetli yagmurlu
+Mugla,2024-11-18,9.7,Bolgesel duzensiz yagmur yagisli
+Mugla,2024-11-19,10.0,Gunesli
+Mugla,2024-11-20,8.5,Parcali Bulutlu
+Mugla,2024-11-21,10.9,Bolgesel duzensiz yagmur yagisli
+Mugla,2024-11-22,12.6,Bolgesel duzensiz yagmur yagisli
+Mugla,2024-11-23,13.3,Bolgesel duzensiz yagmur yagisli
+Mugla,2024-11-24,12.6,Gunesli
+Mugla,2024-11-25,12.6,Gunesli
+Mugla,2024-11-26,12.7,Gunesli
+Mugla,2024-11-27,12.4,Gunesli
+Mugla,2024-11-28,11.7,Gunesli
+Ordu,2024-11-15,12.3,Bolgesel duzensiz yagmur yagisli
+Ordu,2024-11-16,10.5,Siddetli yagmurlu
+Ordu,2024-11-17,10.2,Bolgesel duzensiz yagmur yagisli
+Ordu,2024-11-18,11.8,Bolgesel duzensiz yagmur yagisli
+Ordu,2024-11-19,10.4,Siddetli yagmurlu
+Ordu,2024-11-20,10.0,Gunesli
+Ordu,2024-11-21,14.3,Gunesli
+Ordu,2024-11-22,11.6,Bolgesel duzensiz yagmur yagisli
+Ordu,2024-11-23,11.3,Orta kuvvetli yagmurlu
+Ordu,2024-11-24,7.4,Bolgesel duzensiz yagmur yagisli
+Ordu,2024-11-25,9.0,Gunesli
+Ordu,2024-11-26,8.8,Gunesli
+Ordu,2024-11-27,10.1,Gunesli
+Ordu,2024-11-28,11.2,Gunesli
+Hatay,2024-11-15,15.4,Bolgesel duzensiz yagmur yagisli
+Hatay,2024-11-16,15.5,Bolgesel duzensiz yagmur yagisli
+Hatay,2024-11-17,14.7,Orta kuvvetli yagmurlu
+Hatay,2024-11-18,12.9,Siddetli yagmurlu
+Hatay,2024-11-19,12.6,Bolgesel duzensiz yagmur yagisli
+Hatay,2024-11-20,11.9,Bolgesel duzensiz yagmur yagisli
+Hatay,2024-11-21,14.4,Gunesli
+Hatay,2024-11-22,15.8,Parcali Bulutlu
+Hatay,2024-11-23,16.3,Parcali Bulutlu
+Hatay,2024-11-24,15.5,Gunesli
+Hatay,2024-11-25,15.4,Gunesli
+Hatay,2024-11-26,15.5,Gunesli
+Hatay,2024-11-27,15.0,Gunesli
+Hatay,2024-11-28,14.7,Gunesli
+Afyonkarahisar,2024-11-15,9.4,Bolgesel duzensiz yagmur yagisli
+Afyonkarahisar,2024-11-16,8.4,Bolgesel duzensiz yagmur yagisli
+Afyonkarahisar,2024-11-17,9.3,Bolgesel duzensiz yagmur yagisli
+Afyonkarahisar,2024-11-18,8.2,Bolgesel duzensiz yagmur yagisli
+Afyonkarahisar,2024-11-19,6.6,Parcali Bulutlu
+Afyonkarahisar,2024-11-20,6.3,Gunesli
+Afyonkarahisar,2024-11-21,8.4,Gunesli
+Afyonkarahisar,2024-11-22,10.2,Parcali Bulutlu
+Afyonkarahisar,2024-11-23,8.5,Bolgesel duzensiz yagmur yagisli
+Afyonkarahisar,2024-11-24,6.8,Gunesli
+Afyonkarahisar,2024-11-25,8.0,Gunesli
+Afyonkarahisar,2024-11-26,8.4,Gunesli
+Afyonkarahisar,2024-11-27,9.6,Parcali Bulutlu
+Afyonkarahisar,2024-11-28,9.3,Gunesli
+Zonguldak,2024-11-15,12.5,Orta kuvvetli yagmurlu
+Zonguldak,2024-11-16,10.8,Orta kuvvetli yagmurlu
+Zonguldak,2024-11-17,10.1,Gunesli
+Zonguldak,2024-11-18,11.7,Bolgesel duzensiz yagmur yagisli
+Zonguldak,2024-11-19,11.9,Bolgesel duzensiz yagmur yagisli
+Zonguldak,2024-11-20,12.5,Gunesli
+Zonguldak,2024-11-21,16.1,Gunesli
+Zonguldak,2024-11-22,10.4,Bolgesel duzensiz yagmur yagisli
+Zonguldak,2024-11-23,8.3,Bolgesel duzensiz yagmur yagisli
+Zonguldak,2024-11-24,7.5,Gunesli
+Zonguldak,2024-11-25,10.1,Gunesli
+Zonguldak,2024-11-26,11.7,Gunesli
+Zonguldak,2024-11-27,12.3,Parcali Bulutlu
+Zonguldak,2024-11-28,13.0,Gunesli
+Bolu,2024-11-15,8.4,Orta kuvvetli yagmurlu
+Bolu,2024-11-16,3.6,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-17,4.1,Parcali Bulutlu
+Bolu,2024-11-18,4.3,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-19,4.1,Gunesli
+Bolu,2024-11-20,4.2,Gunesli
+Bolu,2024-11-21,8.9,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-22,9.4,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-23,1.2,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-24,-0.1,Gunesli
+Bolu,2024-11-25,3.2,Gunesli
+Bolu,2024-11-26,7.5,Gunesli
+Bolu,2024-11-27,10.6,Parcali Bulutlu
+Bolu,2024-11-28,9.3,Gunesli
+Rize,2024-11-15,12.6,Gunesli
+Rize,2024-11-16,10.4,Siddetli yagmurlu
+Rize,2024-11-17,9.1,Bolgesel duzensiz yagmur yagisli
+Rize,2024-11-18,12.6,Parcali Bulutlu
+Rize,2024-11-19,11.7,Siddetli yagmurlu
+Rize,2024-11-20,11.7,Gunesli
+Rize,2024-11-21,14.8,Gunesli
+Rize,2024-11-22,13.2,Bolgesel duzensiz yagmur yagisli
+Rize,2024-11-23,13.6,Orta kuvvetli yagmurlu
+Rize,2024-11-24,8.1,Bolgesel duzensiz yagmur yagisli
+Rize,2024-11-25,10.7,Gunesli
+Rize,2024-11-26,10.8,Gunesli
+Rize,2024-11-27,12.0,Gunesli
+Rize,2024-11-28,13.5,Gunesli
+Nevsehir,2024-11-15,10.1,Parcali Bulutlu
+Nevsehir,2024-11-16,9.1,Bolgesel duzensiz yagmur yagisli
+Nevsehir,2024-11-17,7.6,Bolgesel duzensiz yagmur yagisli
+Nevsehir,2024-11-18,7.5,Bolgesel duzensiz yagmur yagisli
+Nevsehir,2024-11-19,7.6,Bolgesel duzensiz yagmur yagisli
+Nevsehir,2024-11-20,6.7,Gunesli
+Nevsehir,2024-11-21,8.2,Gunesli
+Nevsehir,2024-11-22,9.1,Parcali Bulutlu
+Nevsehir,2024-11-23,9.7,Bolgesel duzensiz yagmur yagisli
+Nevsehir,2024-11-24,7.0,Gunesli
+Nevsehir,2024-11-25,7.6,Gunesli
+Nevsehir,2024-11-26,8.0,Gunesli
+Nevsehir,2024-11-27,9.2,Gunesli
+Nevsehir,2024-11-28,10.1,Gunesli
+Batman,2024-11-15,13.1,Gunesli
+Batman,2024-11-16,12.7,Parcali Bulutlu
+Batman,2024-11-17,13.8,Parcali Bulutlu
+Batman,2024-11-18,13.0,Orta kuvvetli yagmurlu
+Batman,2024-11-19,12.3,Bolgesel duzensiz yagmur yagisli
+Batman,2024-11-20,12.3,Bolgesel duzensiz yagmur yagisli
+Batman,2024-11-21,13.0,Gunesli
+Batman,2024-11-22,13.2,Parcali Bulutlu
+Batman,2024-11-23,14.4,Parcali Bulutlu
+Batman,2024-11-24,13.7,Gunesli
+Batman,2024-11-25,12.2,Gunesli
+Batman,2024-11-26,12.5,Gunesli
+Batman,2024-11-27,13.0,Gunesli
+Batman,2024-11-28,12.8,Gunesli
+Aksaray,2024-11-15,10.9,Parcali Bulutlu
+Aksaray,2024-11-16,10.5,Bolgesel duzensiz yagmur yagisli
+Aksaray,2024-11-17,8.9,Bolgesel duzensiz yagmur yagisli
+Aksaray,2024-11-18,8.4,Bolgesel duzensiz yagmur yagisli
+Aksaray,2024-11-19,8.2,Bolgesel duzensiz yagmur yagisli
+Aksaray,2024-11-20,7.2,Gunesli
+Aksaray,2024-11-21,9.7,Gunesli
+Aksaray,2024-11-22,11.1,Parcali Bulutlu
+Aksaray,2024-11-23,12.2,Bolgesel duzensiz yagmur yagisli
+Aksaray,2024-11-24,8.0,Gunesli
+Aksaray,2024-11-25,8.7,Gunesli
+Aksaray,2024-11-26,8.6,Gunesli
+Aksaray,2024-11-27,9.9,Parcali Bulutlu
+Aksaray,2024-11-28,11.1,Parcali Bulutlu
+Bingol,2024-11-15,8.0,Gunesli
+Bingol,2024-11-16,6.7,Bolgesel duzensiz yagmur yagisli
+Bingol,2024-11-17,6.1,Bolgesel duzensiz yagmur yagisli
+Bingol,2024-11-18,5.1,Siddetli yagmurlu
+Bingol,2024-11-19,4.6,Bolgesel duzensiz yagmur yagisli
+Bingol,2024-11-20,4.7,Parcali Bulutlu
+Bingol,2024-11-21,6.5,Bolgesel duzensiz yagmur yagisli
+Bingol,2024-11-22,6.3,Bolgesel duzensiz yagmur yagisli
+Bingol,2024-11-23,8.2,Bolgesel duzensiz yagmur yagisli
+Bingol,2024-11-24,8.8,Gunesli
+Bingol,2024-11-25,9.0,Gunesli
+Bingol,2024-11-26,9.0,Gunesli
+Bingol,2024-11-27,8.0,Gunesli
+Bingol,2024-11-28,7.7,Gunesli
+Karabuk,2024-11-15,8.3,Orta kuvvetli yagmurlu
+Karabuk,2024-11-16,7.9,Orta kuvvetli yagmurlu
+Karabuk,2024-11-17,7.7,Gunesli
+Karabuk,2024-11-18,9.0,Bolgesel duzensiz yagmur yagisli
+Karabuk,2024-11-19,9.4,Bolgesel duzensiz yagmur yagisli
+Karabuk,2024-11-20,8.8,Gunesli
+Karabuk,2024-11-21,12.2,Gunesli
+Karabuk,2024-11-22,9.2,Bolgesel duzensiz yagmur yagisli
+Karabuk,2024-11-23,5.1,Bolgesel duzensiz yagmur yagisli
+Karabuk,2024-11-24,1.6,Gunesli
+Karabuk,2024-11-25,1.0,Gunesli
+Karabuk,2024-11-26,9.2,Gunesli
+Karabuk,2024-11-27,10.4,Parcali Bulutlu
+Karabuk,2024-11-28,11.8,Gunesli
+Bayburt,2024-11-15,3.3,Gunesli
+Bayburt,2024-11-16,2.2,Orta kuvvetli yagmurlu
+Bayburt,2024-11-17,-0.0,Gunesli
+Bayburt,2024-11-18,2.0,Bolgesel duzensiz yagmur yagisli
+Bayburt,2024-11-19,1.5,Bolgesel duzensiz yagmur yagisli
+Bayburt,2024-11-20,1.1,Parcali Bulutlu
+Bayburt,2024-11-21,1.3,Gunesli
+Bayburt,2024-11-22,2.8,Bolgesel duzensiz yagmur yagisli
+Bayburt,2024-11-23,3.5,Bolgesel duzensiz yagmur yagisli
+Bayburt,2024-11-24,-0.2,Gunesli
+Bayburt,2024-11-25,2.2,Gunesli
+Bayburt,2024-11-26,3.2,Gunesli
+Bayburt,2024-11-27,2.8,Gunesli
+Bayburt,2024-11-28,2.6,Gunesli
+Giresun,2024-11-15,13.1,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-16,9.6,Siddetli yagmurlu
+Giresun,2024-11-17,9.3,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-18,12.3,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-19,10.7,Siddetli yagmurlu
+Giresun,2024-11-20,11.3,Gunesli
+Giresun,2024-11-21,13.7,Gunesli
+Giresun,2024-11-22,12.6,Parcali Bulutlu
+Giresun,2024-11-23,11.0,Orta kuvvetli yagmurlu
+Giresun,2024-11-24,7.2,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-25,8.9,Gunesli
+Giresun,2024-11-26,8.9,Gunesli
+Giresun,2024-11-27,10.5,Gunesli
+Giresun,2024-11-28,11.8,Gunesli
+Kahramanmaras,2024-11-15,13.5,Gunesli
+Kahramanmaras,2024-11-16,13.0,Gunesli
+Kahramanmaras,2024-11-17,10.2,Orta kuvvetli yagmurlu
+Kahramanmaras,2024-11-18,9.4,Orta kuvvetli yagmurlu
+Kahramanmaras,2024-11-19,9.3,Gunesli
+Kahramanmaras,2024-11-20,8.2,Bolgesel duzensiz yagmur yagisli
+Kahramanmaras,2024-11-21,10.5,Bolgesel duzensiz yagmur yagisli
+Kahramanmaras,2024-11-22,11.0,Bolgesel duzensiz yagmur yagisli
+Kahramanmaras,2024-11-23,10.9,Cok bulutlu
+Kahramanmaras,2024-11-24,11.3,Gunesli
+Kahramanmaras,2024-11-25,11.7,Gunesli
+Kahramanmaras,2024-11-26,11.9,Gunesli
+Kahramanmaras,2024-11-27,11.6,Gunesli
+Kahramanmaras,2024-11-28,11.0,Gunesli
+Mardin,2024-11-15,13.8,Gunesli
+Mardin,2024-11-16,13.4,Bolgesel duzensiz yagmur yagisli
+Mardin,2024-11-17,13.6,Parcali Bulutlu
+Mardin,2024-11-18,13.7,Bolgesel duzensiz yagmur yagisli
+Mardin,2024-11-19,12.2,Bolgesel duzensiz yagmur yagisli
+Mardin,2024-11-20,11.2,Gunesli
+Mardin,2024-11-21,12.8,Gunesli
+Mardin,2024-11-22,13.6,Bolgesel duzensiz yagmur yagisli
+Mardin,2024-11-23,14.4,Parcali Bulutlu
+Mardin,2024-11-24,14.2,Gunesli
+Mardin,2024-11-25,13.8,Gunesli
+Mardin,2024-11-26,14.1,Gunesli
+Mardin,2024-11-27,13.9,Gunesli
+Mardin,2024-11-28,14.5,Gunesli
+Mus,2024-11-16,26.6,Orta kuvvetli yagmurlu
+Mus,2024-11-17,26.7,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-18,26.7,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-19,26.9,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-20,26.0,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-21,25.6,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-22,26.2,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-23,26.8,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-24,26.6,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-25,26.3,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-26,26.6,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-27,27.0,Bolgesel duzensiz yagmur yagisli
+Mus,2024-11-28,26.6,Bulutlu
+Mus,2024-11-29,26.6,Bolgesel duzensiz yagmur yagisli
+Siirt,2024-11-15,11.8,Gunesli
+Siirt,2024-11-16,11.3,Parcali Bulutlu
+Siirt,2024-11-17,12.1,Bolgesel duzensiz yagmur yagisli
+Siirt,2024-11-18,11.5,Bolgesel duzensiz yagmur yagisli
+Siirt,2024-11-19,11.2,Orta kuvvetli yagmurlu
+Siirt,2024-11-20,10.0,Gunesli
+Siirt,2024-11-21,10.6,Gunesli
+Siirt,2024-11-22,10.7,Parcali Bulutlu
+Siirt,2024-11-23,12.3,Parcali Bulutlu
+Siirt,2024-11-24,12.5,Gunesli
+Siirt,2024-11-25,11.1,Gunesli
+Siirt,2024-11-26,11.6,Gunesli
+Siirt,2024-11-27,11.8,Gunesli
+Siirt,2024-11-28,11.8,Gunesli
+Sivas,2024-11-15,7.7,Bolgesel duzensiz yagmur yagisli
+Sivas,2024-11-16,5.6,Orta kuvvetli yagmurlu
+Sivas,2024-11-17,6.4,Parcali Bulutlu
+Sivas,2024-11-18,7.4,Orta kuvvetli yagmurlu
+Sivas,2024-11-19,6.3,Bolgesel duzensiz yagmur yagisli
+Sivas,2024-11-20,4.5,Gunesli
+Sivas,2024-11-21,6.3,Gunesli
+Sivas,2024-11-22,7.1,Parcali Bulutlu
+Sivas,2024-11-23,7.2,Bolgesel duzensiz yagmur yagisli
+Sivas,2024-11-24,4.3,Gunesli
+Sivas,2024-11-25,6.3,Gunesli
+Sivas,2024-11-26,6.7,Gunesli
+Sivas,2024-11-27,7.2,Gunesli
+Sivas,2024-11-28,6.8,Gunesli
+Kilis,2024-11-15,15.2,Gunesli
+Kilis,2024-11-16,14.4,Gunesli
+Kilis,2024-11-17,13.0,Orta kuvvetli yagmurlu
+Kilis,2024-11-18,11.2,Siddetli yagmurlu
+Kilis,2024-11-19,12.7,Gunesli
+Kilis,2024-11-20,12.6,Bolgesel duzensiz yagmur yagisli
+Kilis,2024-11-21,14.0,Gunesli
+Kilis,2024-11-22,14.3,Parcali Bulutlu
+Kilis,2024-11-23,14.8,Parcali Bulutlu
+Kilis,2024-11-24,15.4,Gunesli
+Kilis,2024-11-25,15.9,Gunesli
+Kilis,2024-11-26,15.2,Gunesli
+Kilis,2024-11-27,15.2,Parcali Bulutlu
+Kilis,2024-11-28,15.0,Gunesli
+Artvin,2024-11-15,4.4,Gunesli
+Artvin,2024-11-16,3.4,Orta kuvvetli yagmurlu
+Artvin,2024-11-17,0.6,Orta kuvvetli karli
+Artvin,2024-11-18,2.4,Cok bulutlu
+Artvin,2024-11-19,2.4,Orta kuvvetli yagmurlu
+Artvin,2024-11-20,2.9,Parcali Bulutlu
+Artvin,2024-11-21,3.1,Gunesli
+Artvin,2024-11-22,3.4,Gunesli
+Artvin,2024-11-23,3.7,Bolgesel duzensiz yagmur yagisli
+Artvin,2024-11-24,-1.7,Parcali Bulutlu
+Artvin,2024-11-25,1.9,Gunesli
+Artvin,2024-11-26,2.7,Gunesli
+Artvin,2024-11-27,4.8,Gunesli
+Artvin,2024-11-28,4.9,Gunesli
+Gumushane,2024-11-15,5.7,Parcali Bulutlu
+Gumushane,2024-11-16,2.7,Orta kuvvetli yagmurlu
+Gumushane,2024-11-17,1.3,Gunesli
+Gumushane,2024-11-18,2.6,Bolgesel duzensiz yagmur yagisli
+Gumushane,2024-11-19,2.9,Orta kuvvetli yagmurlu
+Gumushane,2024-11-20,2.3,Gunesli
+Gumushane,2024-11-21,3.1,Gunesli
+Gumushane,2024-11-22,3.4,Parcali Bulutlu
+Gumushane,2024-11-23,4.2,Bolgesel duzensiz yagmur yagisli
+Gumushane,2024-11-24,0.0,Parcali Bulutlu
+Gumushane,2024-11-25,2.6,Gunesli
+Gumushane,2024-11-26,4.4,Gunesli
+Gumushane,2024-11-27,5.6,Gunesli
+Gumushane,2024-11-28,5.0,Gunesli
+Tokat,2024-11-15,12.0,Bolgesel duzensiz yagmur yagisli
+Tokat,2024-11-16,7.9,Orta kuvvetli yagmurlu
+Tokat,2024-11-17,8.0,Gunesli
+Tokat,2024-11-18,8.4,Orta kuvvetli yagmurlu
+Tokat,2024-11-19,6.9,Bolgesel duzensiz yagmur yagisli
+Tokat,2024-11-20,6.2,Gunesli
+Tokat,2024-11-21,9.7,Gunesli
+Tokat,2024-11-22,11.2,Parcali Bulutlu
+Tokat,2024-11-23,10.7,Bolgesel duzensiz yagmur yagisli
+Tokat,2024-11-24,5.6,Gunesli
+Tokat,2024-11-25,7.0,Gunesli
+Tokat,2024-11-26,6.9,Gunesli
+Tokat,2024-11-27,9.8,Gunesli
+Tokat,2024-11-28,9.5,Gunesli
+Cankiri,2024-11-15,8.1,Bolgesel duzensiz yagmur yagisli
+Cankiri,2024-11-16,7.1,Bolgesel duzensiz yagmur yagisli
+Cankiri,2024-11-17,4.8,Gunesli
+Cankiri,2024-11-18,6.5,Bolgesel duzensiz yagmur yagisli
+Cankiri,2024-11-19,6.4,Parcali Bulutlu
+Cankiri,2024-11-20,4.0,Gunesli
+Cankiri,2024-11-21,8.2,Parcali Bulutlu
+Cankiri,2024-11-22,10.5,Bolgesel duzensiz yagmur yagisli
+Cankiri,2024-11-23,5.1,Bolgesel duzensiz yagmur yagisli
+Cankiri,2024-11-24,1.1,Gunesli
+Cankiri,2024-11-25,5.8,Gunesli
+Cankiri,2024-11-26,7.3,Gunesli
+Cankiri,2024-11-27,7.4,Parcali Bulutlu
+Cankiri,2024-11-28,8.2,Gunesli
+Sinop,2024-11-15,13.2,Orta kuvvetli yagmurlu
+Sinop,2024-11-16,11.4,Orta kuvvetli yagmurlu
+Sinop,2024-11-17,12.1,Bolgesel duzensiz yagmur yagisli
+Sinop,2024-11-18,13.3,Bolgesel duzensiz yagmur yagisli
+Sinop,2024-11-19,13.4,Bolgesel duzensiz yagmur yagisli
+Sinop,2024-11-20,13.7,Parcali Bulutlu
+Sinop,2024-11-21,16.2,Gunesli
+Sinop,2024-11-22,12.5,Bolgesel duzensiz yagmur yagisli
+Sinop,2024-11-23,11.2,Bolgesel duzensiz yagmur yagisli
+Sinop,2024-11-24,10.0,Gunesli
+Sinop,2024-11-25,12.0,Gunesli
+Sinop,2024-11-26,12.7,Gunesli
+Sinop,2024-11-27,13.1,Gunesli
+Sinop,2024-11-28,13.0,Parcali Bulutlu
+Usak,2024-11-15,10.8,Bolgesel duzensiz yagmur yagisli
+Usak,2024-11-16,11.0,Bolgesel duzensiz yagmur yagisli
+Usak,2024-11-17,10.4,Orta kuvvetli yagmurlu
+Usak,2024-11-18,9.1,Bolgesel duzensiz yagmur yagisli
+Usak,2024-11-19,8.3,Gunesli
+Usak,2024-11-20,7.5,Gunesli
+Usak,2024-11-21,10.0,Parcali Bulutlu
+Usak,2024-11-22,11.6,Bolgesel duzensiz yagmur yagisli
+Usak,2024-11-23,9.9,Bolgesel duzensiz yagmur yagisli
+Usak,2024-11-24,9.6,Gunesli
+Usak,2024-11-25,11.0,Gunesli
+Usak,2024-11-26,11.4,Gunesli
+Usak,2024-11-27,11.0,Gunesli
+Usak,2024-11-28,9.8,Gunesli
+Kirsehir,2024-11-15,9.7,Bolgesel duzensiz yagmur yagisli
+Kirsehir,2024-11-16,8.3,Bolgesel duzensiz yagmur yagisli
+Kirsehir,2024-11-17,6.5,Bolgesel duzensiz yagmur yagisli
+Kirsehir,2024-11-18,8.0,Bolgesel duzensiz yagmur yagisli
+Kirsehir,2024-11-19,7.6,Bolgesel duzensiz yagmur yagisli
+Kirsehir,2024-11-20,6.9,Gunesli
+Kirsehir,2024-11-21,8.6,Gunesli
+Kirsehir,2024-11-22,10.3,Parcali Bulutlu
+Kirsehir,2024-11-23,10.8,Bolgesel duzensiz yagmur yagisli
+Kirsehir,2024-11-24,5.7,Gunesli
+Kirsehir,2024-11-25,6.8,Gunesli
+Kirsehir,2024-11-26,7.3,Gunesli
+Kirsehir,2024-11-27,8.5,Parcali Bulutlu
+Kirsehir,2024-11-28,11.1,Gunesli
+Burdur,2024-11-15,13.8,Bolgesel duzensiz yagmur yagisli
+Burdur,2024-11-16,11.1,Bolgesel duzensiz yagmur yagisli
+Burdur,2024-11-17,9.2,Orta kuvvetli yagmurlu
+Burdur,2024-11-18,9.6,Bolgesel duzensiz yagmur yagisli
+Burdur,2024-11-19,10.2,Gunesli
+Burdur,2024-11-20,9.3,Gunesli
+Burdur,2024-11-21,8.6,Bolgesel duzensiz yagmur yagisli
+Burdur,2024-11-22,10.0,Bolgesel duzensiz yagmur yagisli
+Burdur,2024-11-23,11.8,Bolgesel duzensiz yagmur yagisli
+Burdur,2024-11-24,11.9,Gunesli
+Burdur,2024-11-25,11.9,Gunesli
+Burdur,2024-11-26,11.9,Gunesli
+Burdur,2024-11-27,12.3,Parcali Bulutlu
+Burdur,2024-11-28,10.9,Gunesli
+Yozgat,2024-11-15,9.3,Bolgesel duzensiz yagmur yagisli
+Yozgat,2024-11-16,6.8,Bolgesel duzensiz yagmur yagisli
+Yozgat,2024-11-17,6.8,Parcali Bulutlu
+Yozgat,2024-11-18,8.4,Orta kuvvetli yagmurlu
+Yozgat,2024-11-19,7.4,Bolgesel duzensiz yagmur yagisli
+Yozgat,2024-11-20,6.4,Gunesli
+Yozgat,2024-11-21,8.2,Bolgesel duzensiz yagmur yagisli
+Yozgat,2024-11-22,10.4,Bolgesel duzensiz yagmur yagisli
+Yozgat,2024-11-23,8.5,Bolgesel duzensiz yagmur yagisli
+Yozgat,2024-11-24,4.3,Gunesli
+Yozgat,2024-11-25,6.5,Gunesli
+Yozgat,2024-11-26,7.4,Gunesli
+Yozgat,2024-11-27,8.2,Parcali Bulutlu
+Yozgat,2024-11-28,9.3,Gunesli
+Karaman,2024-11-15,10.5,Bolgesel duzensiz yagmur yagisli
+Karaman,2024-11-16,10.4,Bolgesel duzensiz yagmur yagisli
+Karaman,2024-11-17,9.9,Orta kuvvetli yagmurlu
+Karaman,2024-11-18,9.4,Bolgesel duzensiz yagmur yagisli
+Karaman,2024-11-19,8.6,Gunesli
+Karaman,2024-11-20,7.1,Gunesli
+Karaman,2024-11-21,8.3,Gunesli
+Karaman,2024-11-22,9.2,Bolgesel duzensiz yagmur yagisli
+Karaman,2024-11-23,10.8,Parcali Bulutlu
+Karaman,2024-11-24,8.5,Parcali Bulutlu
+Karaman,2024-11-25,8.3,Gunesli
+Karaman,2024-11-26,8.6,Parcali Bulutlu
+Karaman,2024-11-27,10.2,Parcali Bulutlu
+Karaman,2024-11-28,10.5,Gunesli
+Osmaniye,2024-11-15,15.7,Bolgesel duzensiz yagmur yagisli
+Osmaniye,2024-11-16,16.3,Bolgesel duzensiz yagmur yagisli
+Osmaniye,2024-11-17,13.9,Orta kuvvetli yagmurlu
+Osmaniye,2024-11-18,12.3,Orta kuvvetli yagmurlu
+Osmaniye,2024-11-19,14.4,Bolgesel duzensiz yagmur yagisli
+Osmaniye,2024-11-20,11.3,Bolgesel duzensiz yagmur yagisli
+Osmaniye,2024-11-21,12.1,Gunesli
+Osmaniye,2024-11-22,13.3,Bolgesel duzensiz yagmur yagisli
+Osmaniye,2024-11-23,14.2,Cok bulutlu
+Osmaniye,2024-11-24,15.9,Gunesli
+Osmaniye,2024-11-25,15.6,Gunesli
+Osmaniye,2024-11-26,16.4,Gunesli
+Osmaniye,2024-11-27,15.4,Parcali Bulutlu
+Osmaniye,2024-11-28,14.3,Gunesli
+Nigde,2024-11-15,8.3,Gunesli
+Nigde,2024-11-16,6.8,Bolgesel duzensiz yagmur yagisli
+Nigde,2024-11-17,5.1,Orta kuvvetli yagmurlu
+Nigde,2024-11-18,3.2,Bolgesel duzensiz yagmur yagisli
+Nigde,2024-11-19,5.3,Bolgesel duzensiz yagmur yagisli
+Nigde,2024-11-20,4.8,Gunesli
+Nigde,2024-11-21,5.9,Gunesli
+Nigde,2024-11-22,5.2,Bolgesel duzensiz yagmur yagisli
+Nigde,2024-11-23,6.9,Bolgesel duzensiz yagmur yagisli
+Nigde,2024-11-24,7.4,Gunesli
+Nigde,2024-11-25,6.5,Gunesli
+Nigde,2024-11-26,7.7,Gunesli
+Nigde,2024-11-27,8.5,Parcali Bulutlu
+Nigde,2024-11-28,8.0,Gunesli
+Giresun,2024-11-15,13.1,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-16,9.6,Siddetli yagmurlu
+Giresun,2024-11-17,9.3,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-18,12.3,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-19,10.7,Siddetli yagmurlu
+Giresun,2024-11-20,11.3,Gunesli
+Giresun,2024-11-21,13.7,Gunesli
+Giresun,2024-11-22,12.6,Parcali Bulutlu
+Giresun,2024-11-23,11.0,Orta kuvvetli yagmurlu
+Giresun,2024-11-24,7.2,Bolgesel duzensiz yagmur yagisli
+Giresun,2024-11-25,8.9,Gunesli
+Giresun,2024-11-26,8.9,Gunesli
+Giresun,2024-11-27,10.5,Gunesli
+Giresun,2024-11-28,11.8,Gunesli
+Corum,2024-11-15,10.2,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-16,7.9,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-17,6.3,Gunesli
+Corum,2024-11-18,7.1,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-19,7.6,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-20,6.3,Gunesli
+Corum,2024-11-21,10.6,Gunesli
+Corum,2024-11-22,12.4,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-23,9.9,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-24,2.9,Gunesli
+Corum,2024-11-25,6.7,Gunesli
+Corum,2024-11-26,7.2,Gunesli
+Corum,2024-11-27,8.0,Parcali Bulutlu
+Corum,2024-11-28,9.5,Gunesli
+Izmit,2024-11-15,12.3,Orta kuvvetli yagmurlu
+Izmit,2024-11-16,9.8,Orta kuvvetli yagmurlu
+Izmit,2024-11-17,9.3,Parcali Bulutlu
+Izmit,2024-11-18,10.0,Cok bulutlu
+Izmit,2024-11-19,10.1,Gunesli
+Izmit,2024-11-20,11.2,Parcali Bulutlu
+Izmit,2024-11-21,16.1,Bolgesel duzensiz yagmur yagisli
+Izmit,2024-11-22,9.9,Bolgesel duzensiz yagmur yagisli
+Izmit,2024-11-23,7.0,Bolgesel duzensiz yagmur yagisli
+Izmit,2024-11-24,6.0,Gunesli
+Izmit,2024-11-25,7.9,Gunesli
+Izmit,2024-11-26,9.7,Gunesli
+Izmit,2024-11-27,10.9,Cok bulutlu
+Izmit,2024-11-28,11.8,Gunesli
+Bolu,2024-11-15,8.4,Orta kuvvetli yagmurlu
+Bolu,2024-11-16,3.6,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-17,4.1,Parcali Bulutlu
+Bolu,2024-11-18,4.3,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-19,4.1,Gunesli
+Bolu,2024-11-20,4.2,Gunesli
+Bolu,2024-11-21,8.9,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-22,9.4,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-23,1.2,Bolgesel duzensiz yagmur yagisli
+Bolu,2024-11-24,-0.1,Gunesli
+Bolu,2024-11-25,3.2,Gunesli
+Bolu,2024-11-26,7.5,Gunesli
+Bolu,2024-11-27,10.6,Parcali Bulutlu
+Bolu,2024-11-28,9.3,Gunesli
+Corum,2024-11-15,10.2,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-16,7.9,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-17,6.3,Gunesli
+Corum,2024-11-18,7.1,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-19,7.6,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-20,6.3,Gunesli
+Corum,2024-11-21,10.6,Gunesli
+Corum,2024-11-22,12.4,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-23,9.9,Bolgesel duzensiz yagmur yagisli
+Corum,2024-11-24,2.9,Gunesli
+Corum,2024-11-25,6.7,Gunesli
+Corum,2024-11-26,7.2,Gunesli
+Corum,2024-11-27,8.0,Parcali Bulutlu
+Corum,2024-11-28,9.5,Gunesli
+Kastamonu,2024-11-15,4.3,Orta kuvvetli yagmurlu
+Kastamonu,2024-11-16,5.5,Bolgesel duzensiz yagmur yagisli
+Kastamonu,2024-11-17,4.2,Gunesli
+Kastamonu,2024-11-18,5.8,Bolgesel duzensiz yagmur yagisli
+Kastamonu,2024-11-19,5.1,Parcali Bulutlu
+Kastamonu,2024-11-20,5.2,Gunesli
+Kastamonu,2024-11-21,9.1,Bolgesel duzensiz yagmur yagisli
+Kastamonu,2024-11-22,5.9,Bolgesel duzensiz yagmur yagisli
+Kastamonu,2024-11-23,3.3,Bolgesel duzensiz yagmur yagisli
+Kastamonu,2024-11-24,0.4,Gunesli
+Kastamonu,2024-11-25,3.0,Gunesli
+Kastamonu,2024-11-26,7.5,Gunesli
+Kastamonu,2024-11-27,8.5,Gunesli
+Kastamonu,2024-11-28,8.0,Gunesli
+Bartin,2024-11-15,7.3,Bolgesel duzensiz yagmur yagisli
+Bartin,2024-11-16,8.6,Bolgesel duzensiz yagmur yagisli
+Bartin,2024-11-17,6.9,Orta kuvvetli yagmurlu
+Bartin,2024-11-18,5.2,Orta kuvvetli yagmurlu
+Bartin,2024-11-19,2.6,Orta kuvvetli yagmurlu
+Bartin,2024-11-20,2.6,Bolgesel duzensiz yagmur yagisli
+Bartin,2024-11-21,0.2,Hafif sagnak seklinde kar
+Bartin,2024-11-22,-1.1,Parcali Bulutlu
+Bartin,2024-11-23,-0.5,Orta kuvvetli karli
+Bartin,2024-11-24,-0.5,Hafif karli
+Bartin,2024-11-25,-0.6,Hafif dondurucu yagmurlu
+Bartin,2024-11-26,3.2,Parcali Bulutlu
+Bartin,2024-11-27,4.9,Bolgesel duzensiz yagmur yagisli
+Bartin,2024-11-28,6.2,Bulutlu
+Duzce,2024-11-15,6.6,Orta kuvvetli yagmurlu
+Duzce,2024-11-16,9.0,Orta kuvvetli yagmurlu
+Duzce,2024-11-17,7.5,Parcali Bulutlu
+Duzce,2024-11-18,7.9,Parcali Bulutlu
+Duzce,2024-11-19,10.1,Gunesli
+Duzce,2024-11-20,11.0,Gunesli
+Duzce,2024-11-21,15.0,Bolgesel duzensiz yagmur yagisli
+Duzce,2024-11-22,10.7,Bolgesel duzensiz yagmur yagisli
+Duzce,2024-11-23,5.4,Bolgesel duzensiz yagmur yagisli
+Duzce,2024-11-24,2.1,Gunesli
+Duzce,2024-11-25,6.0,Gunesli
+Duzce,2024-11-26,11.2,Gunesli
+Duzce,2024-11-27,10.1,Cok bulutlu
+Duzce,2024-11-28,12.3,Gunesli
+Sakarya,2024-11-15,12.7,Orta kuvvetli yagmurlu
+Sakarya,2024-11-16,9.9,Orta kuvvetli yagmurlu
+Sakarya,2024-11-17,8.5,Parcali Bulutlu
+Sakarya,2024-11-18,10.0,Parcali Bulutlu
+Sakarya,2024-11-19,10.0,Gunesli
+Sakarya,2024-11-20,11.1,Gunesli
+Sakarya,2024-11-21,16.3,Bolgesel duzensiz yagmur yagisli
+Sakarya,2024-11-22,9.9,Bolgesel duzensiz yagmur yagisli
+Sakarya,2024-11-23,7.0,Bolgesel duzensiz yagmur yagisli
+Sakarya,2024-11-24,5.9,Gunesli
+Sakarya,2024-11-25,7.8,Gunesli
+Sakarya,2024-11-26,9.8,Gunesli
+Sakarya,2024-11-27,10.8,Cok bulutlu
+Sakarya,2024-11-28,12.0,Gunesli
+Erzurum,2024-11-15,1.9,Gunesli
+Erzurum,2024-11-16,2.0,Orta kuvvetli yagmurlu
+Erzurum,2024-11-17,-0.6,Hafif dondurucu yagmurlu
+Erzurum,2024-11-18,2.0,Bolgesel duzensiz yagmur yagisli
+Erzurum,2024-11-19,1.6,Orta kuvvetli yagmurlu
+Erzurum,2024-11-20,0.3,Parcali Bulutlu
+Erzurum,2024-11-21,0.4,Parcali Bulutlu
+Erzurum,2024-11-22,2.1,Parcali Bulutlu
+Erzurum,2024-11-23,3.3,Bolgesel duzensiz yagmur yagisli
+Erzurum,2024-11-24,1.6,Bolgesel duzensiz yagmur yagisli
+Erzurum,2024-11-25,1.3,Gunesli
+Erzurum,2024-11-26,1.4,Gunesli
+Erzurum,2024-11-27,1.5,Gunesli
+Erzurum,2024-11-28,1.1,Gunesli
+Sirnak,2024-11-15,8.2,Gunesli
+Sirnak,2024-11-16,8.1,Bolgesel duzensiz yagmur yagisli
+Sirnak,2024-11-17,9.0,Bolgesel duzensiz yagmur yagisli
+Sirnak,2024-11-18,9.0,Bolgesel duzensiz yagmur yagisli
+Sirnak,2024-11-19,7.9,Orta kuvvetli yagmurlu
+Sirnak,2024-11-20,7.4,Parcali Bulutlu
+Sirnak,2024-11-21,8.3,Gunesli
+Sirnak,2024-11-22,8.6,Parcali Bulutlu
+Sirnak,2024-11-23,9.9,Parcali Bulutlu
+Sirnak,2024-11-24,10.3,Gunesli
+Sirnak,2024-11-25,10.2,Gunesli
+Sirnak,2024-11-26,10.7,Gunesli
+Sirnak,2024-11-27,9.9,Gunesli
+Sirnak,2024-11-28,9.0,Gunesli
+Kirklareli,2024-11-15,8.2,Orta kuvvetli yagmurlu
+Kirklareli,2024-11-16,6.2,Gunesli
+Kirklareli,2024-11-17,6.7,Gunesli
+Kirklareli,2024-11-18,6.9,Gunesli
+Kirklareli,2024-11-19,8.3,Parcali Bulutlu
+Kirklareli,2024-11-20,8.9,Bolgesel duzensiz yagmur yagisli
+Kirklareli,2024-11-21,12.9,Bolgesel duzensiz yagmur yagisli
+Kirklareli,2024-11-22,6.5,Gunesli
+Kirklareli,2024-11-23,4.4,Bolgesel duzensiz yagmur yagisli
+Kirklareli,2024-11-24,4.2,Gunesli
+Kirklareli,2024-11-25,7.0,Gunesli
+Kirklareli,2024-11-26,8.3,Gunesli
+Kirklareli,2024-11-27,9.0,Parcali Bulutlu
+Kirklareli,2024-11-28,9.1,Parcali Bulutlu
+Erzincan,2024-11-15,7.1,Gunesli
+Erzincan,2024-11-16,5.4,Orta kuvvetli yagmurlu
+Erzincan,2024-11-17,2.9,Gunesli
+Erzincan,2024-11-18,3.0,Orta kuvvetli yagmurlu
+Erzincan,2024-11-19,2.2,Bolgesel duzensiz yagmur yagisli
+Erzincan,2024-11-20,1.2,Gunesli
+Erzincan,2024-11-21,5.4,Parcali Bulutlu
+Erzincan,2024-11-22,5.5,Parcali Bulutlu
+Erzincan,2024-11-23,5.6,Bolgesel duzensiz yagmur yagisli
+Erzincan,2024-11-24,3.8,Gunesli
+Erzincan,2024-11-25,4.9,Gunesli
+Erzincan,2024-11-26,5.3,Gunesli
+Erzincan,2024-11-27,4.7,Gunesli
+Erzincan,2024-11-28,4.4,Gunesli
