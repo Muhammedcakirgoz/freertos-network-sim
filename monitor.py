@@ -74,6 +74,11 @@ class ProcessPanel:
         self.process = None
         self.running = False
 
+        # Log satirlarini biriktiren thread-safe tampon (bkz. _append_log
+        # ve flush() aciklamalari).
+        self._log_buffer = []
+        self._log_lock = threading.Lock()
+
         renk = self.RENK.get(role_arg, "#444")
 
         # Bu LabelFrame'i disariya (self.frame) aciyoruz - cagiran kod
@@ -173,13 +178,33 @@ class ProcessPanel:
         self._append_log("\n--- process sonlandi ---\n")
 
     def _append_log(self, text):
-        def _apply():
-            self.log_text.insert("end", text)
-            self.log_text.see("end")
-        try:
-            self.log_text.after(0, _apply)
-        except Exception:
-            pass
+        # ONEMLI PERFORMANS NOTU: Burada dogrudan Tkinter widget'ina
+        # yazmiyoruz ve HER SATIRDA ayri bir after(0, ...) cagrisi
+        # yapmiyoruz. Broker/Publisher/Subscriber ayni anda hizli log
+        # urettiginde (ozellikle 5 saniyede bir basilan detayli Health
+        # raporlari), boyle bir yaklasim Tkinter'in tek is parcacikli
+        # olay kuyrugunu BINLERCE kucuk gorevle tikayip, TUM arayuzun
+        # (diger sekmeler dahil) dakikalarca geriden gelmesine sebep
+        # oluyordu. Bunun yerine, satirlari basit, thread-safe bir
+        # listede biriktiriyoruz; gercek widget guncellemesi, merkezi
+        # bir zamanlayici (BrokerMonitor._flush_ui) tarafindan
+        # PERIYODIK ve TOPLU olarak yapiliyor.
+        with self._log_lock:
+            self._log_buffer.append(text)
+
+    def flush(self):
+        """Merkezi flush dongusu tarafindan periyodik olarak cagrilir.
+        Biriken TUM satirlari TEK BIR insert() cagrisiyla widget'a
+        yazar - boylece cok sayida satir birikmis olsa bile, Tkinter
+        olay kuyrugunda sadece BIR gorev olusur."""
+        with self._log_lock:
+            if not self._log_buffer:
+                return
+            text = "".join(self._log_buffer)
+            self._log_buffer.clear()
+
+        self.log_text.insert("end", text)
+        self.log_text.see("end")
 
     def _set_stopped_ui(self):
         def _apply():
@@ -235,6 +260,19 @@ class BrokerMonitor:
         self.thread = threading.Thread(target=self._network_loop, daemon=True)
         self.thread.start()
 
+        # --- MERKEZI, TOPLU (BATCH) ARAYUZ GUNCELLEME DONGUSU ---
+        # Panellerdeki ve kendi log/grafik tamponlarindaki verileri,
+        # HER SATIRDA degil, sabit bir periyotta (150ms) toplu olarak
+        # widget'lara yaziyoruz. Bu, ucu process'in ayni anda hizli log
+        # uretmesi durumunda Tkinter'in olay kuyrugunun tikanmasini
+        # (ve dolayisiyla TUM arayuzun - diger sekmeler dahil -
+        # dakikalarca geriden gelmesini) onler.
+        self._log_buffer = []
+        self._log_lock = threading.Lock()
+        self._chart_buffer = []
+        self._chart_lock = threading.Lock()
+        self.root.after(150, self._flush_ui)
+
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # -------------------------------------------------------------
@@ -281,28 +319,78 @@ class BrokerMonitor:
         self.log_text.configure(yscrollcommand=log_scrollbar.set)
 
     def _log(self, mesaj):
-        def _append():
-            self.log_text.insert("end", mesaj + "\n")
-            self.log_text.see("end")
-        self.root.after(0, _append)
+        # Dogrudan Tkinter'e yazmak (her mesaj icin ayri after(0,...))
+        # yerine, thread-safe bir tampona ekliyoruz - gercek yazma
+        # islemi merkezi _flush_ui dongusunde, toplu olarak yapiliyor.
+        with self._log_lock:
+            self._log_buffer.append(mesaj + "\n")
 
     def _update_client_count(self, sayi):
         self.root.after(0, lambda: self.client_count_var.set(str(sayi)))
 
     def _update_chart(self, deger):
-        def _apply():
-            self.values.append(deger)
+        # Gelen degeri de tampona ekliyoruz - grafik, _flush_ui
+        # dongusunde, TEK SEFERDE (birikmis TUM yeni degerlerle
+        # birlikte) yeniden ciziliyor.
+        with self._chart_lock:
+            self._chart_buffer.append(deger)
+
+    def _flush_ui(self):
+        """Merkezi, periyodik (150ms) arayuz guncelleme dongusu.
+        Panellerdeki VE kendi log/grafik tamponlarindaki verileri toplu
+        olarak isler - boylece log hacmi ne kadar yuksek olursa olsun,
+        Tkinter'in olay kuyrugu sabit, dusuk bir hizda (saniyede ~7
+        kez) calisir, asla tikanmaz."""
+        # 1) Kontrol Paneli'ndeki uc process panelini flush et.
+        for panel in self.panels:
+            panel.flush()
+
+        # 2) Kendi log tamponumuzu flush et.
+        with self._log_lock:
+            if self._log_buffer:
+                text = "".join(self._log_buffer)
+                self._log_buffer.clear()
+                self.log_text.insert("end", text)
+                self.log_text.see("end")
+
+        # 3) Grafik tamponunu flush et - birikmis TUM yeni degerleri
+        # deque'e ekleyip, grafigi SADECE BIR KEZ yeniden ciziyoruz
+        # (her deger icin ayri ayri degil).
+        with self._chart_lock:
+            yeni_degerler = self._chart_buffer[:]
+            self._chart_buffer.clear()
+
+        if yeni_degerler:
+            self.values.extend(yeni_degerler)
             self._draw_chart()
-        self.root.after(0, _apply)
+
+        # Kendini tekrar zamanla - uygulama kapanana kadar surekli calisir.
+        if self.running:
+            self.root.after(150, self._flush_ui)
 
     def _draw_chart(self):
+        # Tkinter'in geometriyi (widget boyutlarini) TAM OLARAK
+        # cozmesini zorluyoruz - aksi halde winfo_width/height, widget
+        # henuz tam yerlesmediyse kucuk bir "yer tutucu" deger
+        # (ornegin 1) dondurebilir.
+        self.canvas.update_idletasks()
         self.canvas.delete("all")
 
         if len(self.values) < 2:
             return
 
-        width = self.canvas.winfo_width() or 600
-        height = self.canvas.winfo_height() or 250
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+
+        # "or 600" YETERLI DEGIL: Tkinter bazen 1 gibi kucuk ama
+        # Python'da "truthy" (0 sayilmayan) bir deger dondurebiliyor,
+        # bu da "or" ile yakalanamiyor. Bu yuzden acik esik kontrolu
+        # yapiyoruz.
+        if width < 50:
+            width = 600
+        if height < 50:
+            height = 250
+
         padding = 30
 
         min_val = min(self.values)
@@ -357,7 +445,12 @@ class BrokerMonitor:
                 sock.settimeout(5)
                 sock.connect((BROKER_HOST, BROKER_PORT))
 
-                kimlik_mesaji = f"AUTH:{AUTH_TOKEN}|ROLE:SUBSCRIBER"
+                # main.c'deki formatla AYNI: "AUTH:token|ROLE:SUBSCRIBER\n"
+                # Sondaki '\n' KRITIK - broker artik authentication
+                # mesajini da diger tum mesajlar gibi '\n' tabanli
+                # framing mekanizmasindan geciriyor; bu karakter
+                # olmadan broker bu mesaji hicbir zaman islemiyor.
+                kimlik_mesaji = f"AUTH:{AUTH_TOKEN}|ROLE:SUBSCRIBER\n"
                 sock.sendall(kimlik_mesaji.encode("utf-8"))
 
                 self._set_status("Bagli", "green")

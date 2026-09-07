@@ -627,7 +627,7 @@ static void vNetworkTask( void *pvParameters )
             * ekleyip eklemeyecegine karar verecek. */
             char kimlikMesaji[ 128 ];
             const char *rolString = ( xRole == ROLE_PUBLISHER ) ? "PUBLISHER" : "SUBSCRIBER";
-            snprintf( kimlikMesaji, sizeof( kimlikMesaji ), "AUTH:%s|ROLE:%s", SHARED_AUTH_TOKEN, rolString );
+            snprintf( kimlikMesaji, sizeof( kimlikMesaji ), "AUTH:%s|ROLE:%s\n", SHARED_AUTH_TOKEN, rolString );
 
             send( clientSocket, kimlikMesaji, (int) strlen( kimlikMesaji ), 0 );
             printf( "[Network] Kimlik bildirildi: %s\n", kimlikMesaji );
@@ -793,6 +793,7 @@ static void vClientHandlerTask( void *pvParameters )
 {
     SOCKET clientSocket = (SOCKET)(uintptr_t) pvParameters;
     bool bIsSubscriber = false;
+    bool bIsAuthenticated = false;
 
     printf( "[ClientHandler] Yeni client task'i basladi (socket: %d)\n",
             (int) clientSocket );
@@ -801,15 +802,14 @@ static void vClientHandlerTask( void *pvParameters )
     ioctlsocket( clientSocket, FIONBIO, &ulMode );
 
     char recvBuffer[ 256 ];
-    char mesajBuffer[ 1024 ] = { 0 };  /* biriken veriyi tutan kalici buffer */
+    char mesajBuffer[ 1024 ] = { 0 };
     int mesajBufferUzunluk = 0;
 
-    /* --- ILK ASAMA: Kimlik mesajini bekle ---
-     * Client, baglandiktan hemen sonra "ROLE:PUBLISHER" ya da
-     * "ROLE:SUBSCRIBER" gonderecek. Non-blocking oldugu icin
-     * hemen gelmeyebilir, bu yuzden kisa bir bekleme donguse kuruyoruz. */
-    int kimlikBekleSayaci = 0;
-    while( kimlikBekleSayaci < 50 )  /* en fazla 50 * 100ms = 5 saniye bekle */
+    /* Authentication icin makul bir zaman asimi - sonsuza kadar
+     * bekleme, 5 saniyede gelmezse baglantiyi kapat. */
+    TickType_t xBaglantiBaslangic = xTaskGetTickCount();
+
+    for( ;; )
     {
         int bytesReceived = recv( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1, 0 );
 
@@ -817,72 +817,6 @@ static void vClientHandlerTask( void *pvParameters )
         {
             recvBuffer[ bytesReceived ] = '\0';
 
-            /* Mesaji "AUTH:token|ROLE:rol" formatinda ayristiriyoruz.
-            * strtok, verilen ayraca (burada "|") gore string'i parcalara boler. */
-            char bufferKopyasi[ 256 ];
-            strncpy( bufferKopyasi, recvBuffer, sizeof( bufferKopyasi ) - 1 );
-            bufferKopyasi[ sizeof( bufferKopyasi ) - 1 ] = '\0';
-
-            char *authKismi = strtok( bufferKopyasi, "|" );  /* "AUTH:gizli_sifre123" */
-            char *roleKismi = strtok( NULL, "|" );             /* "ROLE:PUBLISHER" */
-
-            bool bAuthBasarili = false;
-
-            if( authKismi != NULL && strncmp( authKismi, "AUTH:", 5 ) == 0 )
-            {
-                const char *gelenToken = authKismi + 5;  /* "AUTH:" kismini atla */
-
-                if( strcmp( gelenToken, SHARED_AUTH_TOKEN ) == 0 )
-                {
-                    bAuthBasarili = true;
-                }
-            }
-
-            if( !bAuthBasarili )
-            {
-                printf( "[ClientHandler] YETKISIZ BAGLANTI! Token dogrulanamadi, baglanti reddediliyor.\n" );
-                closesocket( clientSocket );
-                vTaskDelete( NULL );
-            }
-
-            printf( "[ClientHandler] Authentication basarili.\n" );
-
-            /* Simdi rol kismini isliyoruz */
-            if( roleKismi != NULL && strcmp( roleKismi, "ROLE:SUBSCRIBER" ) == 0 )
-            {
-                bIsSubscriber = true;
-                printf( "[ClientHandler] Bu client bir SUBSCRIBER.\n" );
-
-                xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-                if( xSubscriberCount < MAX_CLIENTS )
-                {
-                    xSubscriberSockets[ xSubscriberCount ] = clientSocket;
-                    xSubscriberCount++;
-                }
-                xSemaphoreGive( xSubscriberListMutex );
-            }
-            else if( roleKismi != NULL && strcmp( roleKismi, "ROLE:PUBLISHER" ) == 0 )
-            {
-                printf( "[ClientHandler] Bu client bir PUBLISHER.\n" );
-            }
-
-            break;
-        }
-
-        kimlikBekleSayaci++;
-        vTaskDelay( pdMS_TO_TICKS( 100 ) );
-    }
-
-    /* --- IKINCI ASAMA: Normal veri dinleme donguse --- */
-        for( ;; )
-    {
-        int bytesReceived = recv( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1, 0 );
-
-        if( bytesReceived > 0 )
-        {
-            recvBuffer[ bytesReceived ] = '\0';
-
-            /* Gelen veriyi kalici buffer'a EKLE (biriktir) */
             if( mesajBufferUzunluk + bytesReceived < (int) sizeof( mesajBuffer ) - 1 )
             {
                 memcpy( mesajBuffer + mesajBufferUzunluk, recvBuffer, bytesReceived );
@@ -890,46 +824,93 @@ static void vClientHandlerTask( void *pvParameters )
                 mesajBuffer[ mesajBufferUzunluk ] = '\0';
             }
 
-            /* Buffer icinde tam mesaj(lar) var mi diye kontrol et -
-            * '\n' karakterini ara. Birden fazla mesaj birikmis olabilir,
-            * bu yuzden WHILE ile hepsini sirayla isliyoruz. */
             char *newlinePos;
             while( ( newlinePos = strchr( mesajBuffer, '\n' ) ) != NULL )
             {
-                /* '\n' karakterinin oldugu yeri '\0' yaparak, tek bir
-                * tam mesaji izole ediyoruz. */
                 *newlinePos = '\0';
-
-                /* --- TEMEL VERI DOGRULAMASI --- */
                 int mesajUzunlugu = (int) strlen( mesajBuffer );
 
-                if( mesajUzunlugu == 0 )
+                if( !bIsAuthenticated )
                 {
-                    /* Bos mesaj - islenecek bir sey yok, atla. */
+                    /* --- ILK SATIR: AUTHENTICATION MESAJI ---
+                     * ARTIK ayri bir recv() DEGIL, mesajBuffer/framing
+                     * mekanizmasinin BIR PARCASI. Boylece client, AUTH
+                     * mesajindan hemen sonra baska mesajlar gonderse
+                     * bile (ayni TCP paketinde birlesmis olsalar
+                     * bile), her biri DOGRU sekilde, sirayla
+                     * ayristiriliyor. */
+                    char bufferKopyasi[ 256 ];
+                    strncpy( bufferKopyasi, mesajBuffer, sizeof( bufferKopyasi ) - 1 );
+                    bufferKopyasi[ sizeof( bufferKopyasi ) - 1 ] = '\0';
+
+                    char *authKismi = strtok( bufferKopyasi, "|" );
+                    char *roleKismi = strtok( NULL, "|" );
+
+                    bool bAuthBasarili = false;
+
+                    if( authKismi != NULL && strncmp( authKismi, "AUTH:", 5 ) == 0 )
+                    {
+                        const char *gelenToken = authKismi + 5;
+                        if( strcmp( gelenToken, SHARED_AUTH_TOKEN ) == 0 )
+                        {
+                            bAuthBasarili = true;
+                        }
+                    }
+
+                    if( !bAuthBasarili )
+                    {
+                        printf( "[ClientHandler] YETKISIZ BAGLANTI! Token dogrulanamadi, baglanti reddediliyor.\n" );
+                        closesocket( clientSocket );
+                        vTaskDelete( NULL );
+                    }
+
+                    printf( "[ClientHandler] Authentication basarili.\n" );
+                    bIsAuthenticated = true;
+
+                    if( roleKismi != NULL && strcmp( roleKismi, "ROLE:SUBSCRIBER" ) == 0 )
+                    {
+                        bIsSubscriber = true;
+                        printf( "[ClientHandler] Bu client bir SUBSCRIBER.\n" );
+
+                        xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+                        if( xSubscriberCount < MAX_CLIENTS )
+                        {
+                            xSubscriberSockets[ xSubscriberCount ] = clientSocket;
+                            xSubscriberCount++;
+                        }
+                        xSemaphoreGive( xSubscriberListMutex );
+                    }
+                    else if( roleKismi != NULL && strcmp( roleKismi, "ROLE:PUBLISHER" ) == 0 )
+                    {
+                        printf( "[ClientHandler] Bu client bir PUBLISHER.\n" );
+                    }
+                    else
+                    {
+                        printf( "[ClientHandler] UYARI: Bilinmeyen rol, baglanti kapatiliyor.\n" );
+                        closesocket( clientSocket );
+                        vTaskDelete( NULL );
+                    }
+                }
+                else if( mesajUzunlugu == 0 )
+                {
                     printf( "[ClientHandler] UYARI: Bos mesaj alindi, yok sayiliyor.\n" );
                 }
                 else if( mesajUzunlugu > 200 )
                 {
-                    /* Beklenenden cok uzun bir mesaj - supheli, reddet.
-                    * (Normal test mesajlarimiz ~40-50 karakter civarinda.) */
                     printf( "[ClientHandler] UYARI: Anormal uzunlukta mesaj (%d byte), "
                             "reddediliyor.\n", mesajUzunlugu );
                 }
                 else
                 {
-                    /* --- JSON DOGRULAMASI --- */
                     cJSON *parsedJson = cJSON_Parse( mesajBuffer );
 
                     if( parsedJson == NULL )
                     {
-                        /* JSON parse basarisiz - bozuk/gecersiz veri. */
                         printf( "[ClientHandler] UYARI: Gecersiz JSON alindi, reddediliyor. "
                                 "Gelen: %s\n", mesajBuffer );
                     }
                     else
                     {
-                        /* JSON gecerli - simdi gerekli alanlarin var olup olmadigini
-                        * ve dogru tipte olup olmadigini kontrol ediyoruz. */
                         cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
                         cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
 
@@ -947,12 +928,16 @@ static void vClientHandlerTask( void *pvParameters )
                             bGecerliMesaj = false;
                         }
 
-                        if( bGecerliMesaj )
+                        if( bIsSubscriber )
+                        {
+                            printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
+                                    "calisti, veri reddediliyor. Gelen: %s\n", mesajBuffer );
+                        }
+                        else if( bGecerliMesaj )
                         {
                             printf( "[ClientHandler] Gecerli JSON alindi -> topic: %s, payload: %s\n",
                                     topicItem->valuestring, payloadItem->valuestring );
 
-                            /* Dogrulanan veriyi subscriber'lara ilet. */
                             xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
                             for( int i = 0; i < xSubscriberCount; i++ )
                             {
@@ -970,15 +955,12 @@ static void vClientHandlerTask( void *pvParameters )
                                     "subscriber'lara iletilmedi.\n" );
                         }
 
-                        /* --- ONEMLI: parsedJson icin ayrilan bellegi TEMIZLE --- */
                         cJSON_Delete( parsedJson );
                     }
                 }
-                /* Islenen mesaji buffer'dan CIKAR - kalan kismi (varsa
-                * bir sonraki mesajin basi) buffer'in basina kaydir. */
+
                 int islenenUzunluk = (int)( newlinePos - mesajBuffer ) + 1;
                 int kalanUzunluk = mesajBufferUzunluk - islenenUzunluk;
-
                 memmove( mesajBuffer, newlinePos + 1, kalanUzunluk );
                 mesajBufferUzunluk = kalanUzunluk;
                 mesajBuffer[ mesajBufferUzunluk ] = '\0';
@@ -989,26 +971,23 @@ static void vClientHandlerTask( void *pvParameters )
             printf( "[ClientHandler] Client baglantiyi kapatti.\n" );
             break;
         }
-        else    
+        else
         {
-            /* bytesReceived < 0 - bir hata kodu var, AMA bu her zaman
-            * gercek bir hata anlamina gelmez. Non-blocking modda,
-            * "su an veri yok" durumu da boyle rapor edilir. */
             int hataKodu = WSAGetLastError();
-
             if( hataKodu != WSAEWOULDBLOCK )
             {
-                /* WSAEWOULDBLOCK DISINDA bir kod geldi - bu GERCEK bir hata,
-                * ornegin karsi taraf aniden koptu (WSAECONNRESET) gibi. */
                 printf( "[ClientHandler] HATA: recv() basarisiz, kod: %d - "
                         "baglanti sonlandiriliyor.\n", hataKodu );
                 break;
             }
-            /* hataKodu == WSAEWOULDBLOCK ise: normal durum, veri yok,
-            * dongu devam etsin. */
         }
 
-
+        if( !bIsAuthenticated &&
+            ( xTaskGetTickCount() - xBaglantiBaslangic ) > pdMS_TO_TICKS( 5000 ) )
+        {
+            printf( "[ClientHandler] UYARI: 5 saniye icinde authentication gelmedi, baglanti kapatiliyor.\n" );
+            break;
+        }
 
         vTaskDelay( pdMS_TO_TICKS( 100 ) );
     }
