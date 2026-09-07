@@ -13,6 +13,18 @@
 #include <stdbool.h>
 #include "timers.h"
 
+#define MAX_SICAKLIK_KAYIT 32
+
+typedef struct
+{
+    char tarih[ 16 ];
+    float sicaklik;
+    float nem;
+} SicaklikKaydi_t;
+
+static SicaklikKaydi_t xSicaklikVerileri[ MAX_SICAKLIK_KAYIT ];
+static int xSicaklikKayitSayisi = 0;
+
 
 typedef enum
 {
@@ -38,6 +50,8 @@ typedef struct
     char topic[ 64 ];
     char payload[ 16 ];
     int  mesaj_no;
+    char tarih[ 16 ];
+    char nem[ 8 ];
 } PublishData_t;
 
 static QueueHandle_t xInternalCommQueue = NULL;
@@ -106,6 +120,7 @@ static void prvParseNetworkArgsFromArgs( int argc, char *argv[] );
 static void prvPrintUsage( const char *pcProgramName );  
 static void prvCreateTasksForRole( SystemRole_t xRole );
 static void vStatusBroadcastCallback( TimerHandle_t xTimer );
+static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
 
 int main( int argc, char *argv[] )
 {
@@ -140,6 +155,7 @@ int main( int argc, char *argv[] )
      *    normal C kodu olarak calisiyoruz. */
     xMyRole = prvParseRoleFromArgs( argc, argv );
     prvParseNetworkArgsFromArgs( argc, argv );   /* <-- YENİ SATIR */
+    prvSicaklikVerisiYukle( "ankara_sicaklik_verileri.csv" );
 
     if( xMyRole == ROLE_UNDEFINED )
     {
@@ -217,6 +233,41 @@ int main( int argc, char *argv[] )
     WSACleanup();
     return EXIT_FAILURE;
 }
+
+static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
+{
+    FILE *fp = fopen( pcDosyaYolu, "r" );
+
+    if( fp == NULL )
+    {
+        printf( "[main] UYARI: '%s' bulunamadi, sahte (rastgele) veri "
+                "kullanilacak.\n", pcDosyaYolu );
+        return;
+    }
+
+    char satir[ 128 ];
+    fgets( satir, sizeof( satir ), fp );  /* baslik satirini atla */
+
+    while( fgets( satir, sizeof( satir ), fp ) != NULL &&
+           xSicaklikKayitSayisi < MAX_SICAKLIK_KAYIT )
+    {
+        if( sscanf( satir, "%15[^,],%f,%f",
+                    xSicaklikVerileri[ xSicaklikKayitSayisi ].tarih,
+                    &xSicaklikVerileri[ xSicaklikKayitSayisi ].sicaklik,
+                    &xSicaklikVerileri[ xSicaklikKayitSayisi ].nem ) == 3 )
+        {
+            xSicaklikKayitSayisi++;
+        }
+    }
+
+    fclose( fp );
+    printf( "[main] Gercek sicaklik veri seti yuklendi: %d kayit (%s).\n",
+            xSicaklikKayitSayisi, pcDosyaYolu );
+}
+
+
+
+
 /*-----------------------------------------------------------*/
 /* =======================================================================
  * prvParseNetworkArgsFromArgs()
@@ -649,6 +700,8 @@ static void vNetworkTask( void *pvParameters )
                     cJSON_AddStringToObject( root, "topic", gelenVeri.topic );
                     cJSON_AddStringToObject( root, "payload", gelenVeri.payload );
                     cJSON_AddNumberToObject( root, "mesaj_no", gelenVeri.mesaj_no );
+                    cJSON_AddStringToObject( root, "tarih", gelenVeri.tarih );
+                    cJSON_AddStringToObject( root, "nem", gelenVeri.nem );
 
                     char *jsonString = cJSON_PrintUnformatted( root );
 
@@ -1056,19 +1109,43 @@ static void vMqttPublisherTask( void *pvParameters )
 
     for( ;; )
     {
-        /* --- Sahte sensor verisi uret (ARTIK BURADA, Network Task'ta DEGIL) --- */
         PublishData_t veri;
 
-        float sahteDeger = 20.0f + ( rand() % 100 ) / 10.0f;
-        snprintf( veri.payload, sizeof( veri.payload ), "%.1f", sahteDeger );
+        /* --- Sahte veri yerine, GERCEK veri setinden SIRAYLA oku --- */
+        float gercekDeger;
+        char gercekTarih[ 16 ] = "bilinmiyor";
+        float gercekNem = 0.0f;
+
+        if( xSicaklikKayitSayisi > 0 )
+        {
+            static int xVeriIndeksi = 0;
+
+            gercekDeger = xSicaklikVerileri[ xVeriIndeksi ].sicaklik;
+            gercekNem   = xSicaklikVerileri[ xVeriIndeksi ].nem;
+            strncpy( gercekTarih, xSicaklikVerileri[ xVeriIndeksi ].tarih, sizeof( gercekTarih ) - 1 );
+
+            printf( "[MqttPub] Gercek veri kullaniliyor: %s tarihli kayit\n", gercekTarih );
+
+            xVeriIndeksi = ( xVeriIndeksi + 1 ) % xSicaklikKayitSayisi;
+        }
+        else
+        {
+            /* Veri seti yuklenemediyse, eski (rastgele) yonteme geri don. */
+            gercekDeger = 20.0f + ( rand() % 100 ) / 10.0f;
+            gercekNem   = 50.0f;
+        }
+
+        snprintf( veri.payload, sizeof( veri.payload ), "%.1f", gercekDeger );
+        strncpy( veri.tarih, gercekTarih, sizeof( veri.tarih ) - 1 );
+        snprintf( veri.nem, sizeof( veri.nem ), "%.0f", gercekNem );
 
         strncpy( veri.topic, "sensor/sicaklik", sizeof( veri.topic ) - 1 );
         veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
 
         veri.mesaj_no = mesajSayaci;
 
-        printf( "[MqttPub] Veri uretildi: %s = %s (no: %d)\n",
-                veri.topic, veri.payload, mesajSayaci );
+        printf( "[MqttPub] Veri uretildi: %s = %s, nem: %s%% (no: %d)\n",
+                veri.topic, veri.payload, veri.nem, mesajSayaci );
 
         /* Ureteni Network Task'a TESLIM ET - JSON'a cevirme ve
          * gonderme islerine hic karismiyoruz, o Network Task'in isi. */
