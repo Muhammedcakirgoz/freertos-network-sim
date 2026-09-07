@@ -80,6 +80,7 @@ static QueueHandle_t xPublishQueue = NULL;
 #define DEFAULT_BROKER_IP    "127.0.0.1"
 #define PRIORITY_UDP_COMMAND       ( tskIDLE_PRIORITY + 2 )
 #define STACK_SIZE_UDP_COMMAND     ( configMINIMAL_STACK_SIZE * 4 )
+#define IDLE_TIMEOUT_MS   30000   /* 30 saniye hic baglanti gelmezse kapan */
 
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
@@ -103,6 +104,9 @@ static TaskHandle_t xMqttPublisherTaskHandle   = NULL;
 static TaskHandle_t xMqttSubscriberTaskHandle  = NULL;
 /* Broker durum yayini icin software timer. */
 static TimerHandle_t xStatusTimer = NULL;
+static TimerHandle_t xIdleTimeoutTimer = NULL;
+static TickType_t xSonBaglantiZamani = 0;
+static bool bBilerekKapatiliyor = false;
 /* Komut satirindan override edilebilen ag ayarlari. Varsayilan
  * degerlerle baslar, prvParseNetworkArgsFromArgs() cagrildiginda
  * kullanici argüman verdiyse guncellenir. */
@@ -124,6 +128,8 @@ static void prvCreateTasksForRole( SystemRole_t xRole );
 static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
 static void vUdpCommandTask( void *pvParameters );
+static void vIdleTimeoutCallback( TimerHandle_t xTimer );
+
 
 int main( int argc, char *argv[] )
 {
@@ -222,6 +228,26 @@ int main( int argc, char *argv[] )
         printf( "HATA: Status timer baslatilamadi!\n" );
         return EXIT_FAILURE;
     }
+     /* --- YENI: Idle-timeout timer'i --- */
+    xIdleTimeoutTimer = xTimerCreate(
+        "IdleTimeout",
+        pdMS_TO_TICKS( 5000 ),      /* her 5 saniyede bir kontrol et */
+        pdTRUE,
+        NULL,
+        vIdleTimeoutCallback
+    );
+
+    if( xIdleTimeoutTimer == NULL )
+    {
+        printf( "HATA: Idle timeout timer olusturulamadi!\n" );
+        return EXIT_FAILURE;
+    }
+
+    if( xTimerStart( xIdleTimeoutTimer, 0 ) != pdPASS )
+    {
+        printf( "HATA: Idle timeout timer baslatilamadi!\n" );
+        return EXIT_FAILURE;
+    }
 }
 
     /* 2) ADIM: Role uygun task'lari olustur. */
@@ -230,11 +256,25 @@ int main( int argc, char *argv[] )
     /* 3) ADIM: Scheduler'i baslat - bu satirdan sonra kontrol
      *    bir daha asla buraya donmez. */
     vTaskStartScheduler();
+    
 
-    /* Buraya normalde HICBIR ZAMAN ulasilmaz. */
+   /* Buraya iki sebepten ulasilabilir:
+    * 1) Gercek bir hata - scheduler hic baslayamadi (yetersiz heap)
+    * 2) BILEREK - vIdleTimeoutCallback icinde vTaskEndScheduler()
+    *    cagirdik, bu PLANLI bir kapanis. */
+    if( bBilerekKapatiliyor )
+    {
+        printf( "\n[main] Broker, idle-timeout nedeniyle kendini duzgun "
+                "sekilde kapatti.\n" );
+        WSACleanup();
+        return EXIT_SUCCESS;
+    }
+else
+{
     printf( "HATA: Scheduler baslatilamadi (yetersiz heap olabilir)\n" );
     WSACleanup();
     return EXIT_FAILURE;
+}
 }
 
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
@@ -614,7 +654,8 @@ static void vNetworkTask( void *pvParameters )
             clientSocket = accept( listenSocket, NULL, NULL );
 
             if( clientSocket != INVALID_SOCKET )
-            {
+            {       
+                    xSonBaglantiZamani = xTaskGetTickCount();  /* idle-timeout sayacini sifirla */
                     printf( "[Network] Yeni bir client baglandi! Kendi task'i olusturuluyor...\n" );
 
                     TaskHandle_t xClientHandle = NULL;
@@ -1220,6 +1261,37 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer )
     printf( "[StatusTimer] Durum yayinlandi (subscriber sayisi: %d)\n", xSubscriberCount );
 }
 
+/* =======================================================================
+ * vIdleTimeoutCallback()
+ *
+ * Periyodik olarak (5 saniyede bir) kontrol eder: en son bir client
+ * baglandigindan bu yana ne kadar sure gecti? Belirlenen esigi
+ * (IDLE_TIMEOUT_MS) asarsa, broker'i DUZGUN sekilde kapatir.
+ * ===================================================================== */
+static void vIdleTimeoutCallback( TimerHandle_t xTimer )
+{
+    ( void ) xTimer;
+
+    TickType_t suankiZaman = xTaskGetTickCount();
+    TickType_t gecenSure   = suankiZaman - xSonBaglantiZamani;
+
+    if( gecenSure > pdMS_TO_TICKS( IDLE_TIMEOUT_MS ) )
+    {
+        printf( "\n[IdleTimeout] %lu saniyedir hic yeni baglanti gelmedi - "
+                "broker kendini kapatiyor...\n",
+                (unsigned long) ( gecenSure * portTICK_PERIOD_MS / 1000 ) );
+
+        /* NOT: vTaskEndScheduler() bu Windows Simulator portunda TAM
+         * calismiyor - Timer Service task'ini silip zamanlamayi
+         * durduruyor ama diger task'lar (Health gibi) kendi Windows
+         * thread'lerinde calismaya devam ediyor (her FreeRTOS task'i
+         * bu portta GERCEK bir Windows thread'i oldugu icin). Bu
+         * yuzden TUM PROCESS'i dogrudan sonlandiriyoruz - bu, gercek
+         * bir cihazin kapanmasiyla islevsel olarak ayni sonucu verir. */
+        WSACleanup();
+        exit( EXIT_SUCCESS );
+    }
+}
 
 static void vMqttPublisherTask( void *pvParameters )
 {
