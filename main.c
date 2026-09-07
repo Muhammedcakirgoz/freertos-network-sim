@@ -78,6 +78,8 @@ static QueueHandle_t xPublishQueue = NULL;
 #define SHARED_AUTH_TOKEN           "gizli_sifre123"
 #define DEFAULT_PORT         8080
 #define DEFAULT_BROKER_IP    "127.0.0.1"
+#define PRIORITY_UDP_COMMAND       ( tskIDLE_PRIORITY + 2 )
+#define STACK_SIZE_UDP_COMMAND     ( configMINIMAL_STACK_SIZE * 4 )
 
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
@@ -121,6 +123,7 @@ static void prvPrintUsage( const char *pcProgramName );
 static void prvCreateTasksForRole( SystemRole_t xRole );
 static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
+static void vUdpCommandTask( void *pvParameters );
 
 int main( int argc, char *argv[] )
 {
@@ -373,6 +376,20 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
                             PRIORITY_NETWORK,
                             &xNetworkTaskHandle );
     configASSERT( xResult == pdPASS );
+
+    /* MQTT'DEN BAGIMSIZ komut kanali - her rolde calisir, TCP/JSON
+     * altyapisina hic dokunmaz, kendi UDP soketini ve basit metin
+     * protokolunu kullanir. */
+    {
+        TaskHandle_t xUdpCmdHandle = NULL;
+        xResult = xTaskCreate( vUdpCommandTask,
+                                "UdpCmd",
+                                STACK_SIZE_UDP_COMMAND,
+                                NULL,
+                                PRIORITY_UDP_COMMAND,
+                                &xUdpCmdHandle );
+        configASSERT( xResult == pdPASS );
+    }
 
     /* --- Role ozel task'lar --- */
 
@@ -1059,6 +1076,98 @@ static void vClientHandlerTask( void *pvParameters )
     printf( "[ClientHandler] Task sonlandiriliyor.\n" );
     vTaskDelete( NULL );
 }
+
+/* =======================================================================
+ * vUdpCommandTask()
+ *
+ * MQTT/TCP/JSON altyapisindan TAMAMEN BAGIMSIZ, hafif bir komut kanali.
+ * UDP kullanir (baglanti kurmaya gerek yok), duz metin komutlar kabul
+ * eder (JSON yok, framing yok, authentication yok, Queue yok). Her
+ * rolde (broker/publisher/subscriber) calisir, dogrudan FreeRTOS
+ * API'lerini cagirip anlik cevap verir.
+ *
+ * Ana TCP portunun +1000'i uzerinde dinler (orn. broker 8080 ise,
+ * UDP komut kanali 9080'de).
+ * ===================================================================== */
+static void vUdpCommandTask( void *pvParameters )
+{
+    ( void ) pvParameters;
+
+    SOCKET udpSocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+
+    if( udpSocket == INVALID_SOCKET )
+    {
+        printf( "[UdpCmd] HATA: UDP soket olusturulamadi, kod: %d\n", WSAGetLastError() );
+        vTaskDelete( NULL );
+    }
+
+    struct sockaddr_in udpAddr;
+    memset( &udpAddr, 0, sizeof( udpAddr ) );
+    udpAddr.sin_family      = AF_INET;
+    udpAddr.sin_addr.s_addr = INADDR_ANY;
+    udpAddr.sin_port        = htons( (uint16_t) ( xPortNumarasi + 1000 ) );
+
+    if( bind( udpSocket, (struct sockaddr *) &udpAddr, sizeof( udpAddr ) ) == SOCKET_ERROR )
+    {
+        printf( "[UdpCmd] HATA: UDP bind basarisiz, kod: %d\n", WSAGetLastError() );
+        closesocket( udpSocket );
+        vTaskDelete( NULL );
+    }
+
+    u_long ulMode = 1;
+    ioctlsocket( udpSocket, FIONBIO, &ulMode );
+
+    printf( "[UdpCmd] MQTT'den BAGIMSIZ komut kanali - UDP port %d'de dinlemede...\n",
+            xPortNumarasi + 1000 );
+
+    char recvBuf[ 64 ];
+
+    for( ;; )
+    {
+        struct sockaddr_in gonderenAdres;
+        int adresBoyu = sizeof( gonderenAdres );
+
+        int alinanBayt = recvfrom( udpSocket, recvBuf, sizeof( recvBuf ) - 1, 0,
+                                    (struct sockaddr *) &gonderenAdres, &adresBoyu );
+
+        if( alinanBayt > 0 )
+        {
+            recvBuf[ alinanBayt ] = '\0';
+
+            /* Basit metin komutlari - JSON YOK, framing YOK, Queue YOK -
+             * MQTT altyapisindan tamamen bagimsiz, dogrudan cevap. */
+            char cevap[ 128 ];
+
+            if( strncmp( recvBuf, "PING", 4 ) == 0 )
+            {
+                snprintf( cevap, sizeof( cevap ), "PONG" );
+            }
+            else if( strncmp( recvBuf, "HEAP", 4 ) == 0 )
+            {
+                snprintf( cevap, sizeof( cevap ), "HEAP:%u",
+                          (unsigned int) xPortGetFreeHeapSize() );
+            }
+            else if( strncmp( recvBuf, "STATUS", 6 ) == 0 )
+            {
+                snprintf( cevap, sizeof( cevap ), "ROLE:%d,TASKS:%u",
+                          (int) xMyRole, (unsigned int) uxTaskGetNumberOfTasks() );
+            }
+            else
+            {
+                snprintf( cevap, sizeof( cevap ), "BILINMEYEN_KOMUT" );
+            }
+
+            sendto( udpSocket, cevap, (int) strlen( cevap ), 0,
+                    (struct sockaddr *) &gonderenAdres, adresBoyu );
+
+            printf( "[UdpCmd] Komut alindi: '%s' -> Cevap: '%s'\n", recvBuf, cevap );
+        }
+
+        vTaskDelay( pdMS_TO_TICKS( 100 ) );
+    }
+}
+
+
 
 /* =======================================================================
  * vStatusBroadcastCallback()
