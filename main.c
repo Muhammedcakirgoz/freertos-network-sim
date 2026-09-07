@@ -39,7 +39,7 @@ static SystemRole_t xMyRole = ROLE_UNDEFINED;
 typedef struct
 {
     char topic[ 64 ];
-    char payload[ 64 ];
+    char payload[ 128 ];  /* ONCEDEN 64 idi - nested JSON payload'lar icin buyutuldu */
 } SensorData_t;
 
 /* MQTT Publisher Task'tan Network Task'a GIDECEK veriyi tasiyan yapi.
@@ -489,20 +489,19 @@ static void vHealthTask( void *pvParameters )
                 cJSON *healthRoot = cJSON_CreateObject();
                 cJSON_AddStringToObject( healthRoot, "topic", "system/health" );
 
-                /* payload'i tek bir JSON string olarak paketliyoruz -
-                * boylece mevcut {"topic":"...","payload":"..."} formatina
-                * uyumlu kaliyoruz, subscriber tarafinda ek bir ayristirma
-                * mantigi degistirmemize gerek kalmiyor. */
-                char payloadStr[ 160 ];  /* ts alani icin buyuttuk */
-                snprintf( payloadStr, sizeof( payloadStr ),
-                "heap:%u,min_heap:%u,doluluk:%%%d,task_sayisi:%u,ts:%llu",
-                (unsigned int) bosHeap,
-                (unsigned int) minBosHeap,
-                dolulukYuzdesi,
-                (unsigned int) uxTaskSayisi,
-                xOlcumZamani );   /* <-- artik erken alinan zamani kullaniyoruz */
+                /* payload'i artik DUZ STRING degil, GERCEK NESTED JSON nesnesi
+                * olarak olusturuyoruz. */
+                cJSON *healthPayload = cJSON_CreateObject();
+                cJSON_AddNumberToObject( healthPayload, "heap", (double) bosHeap );
+                cJSON_AddNumberToObject( healthPayload, "min_heap", (double) minBosHeap );
+                cJSON_AddNumberToObject( healthPayload, "doluluk", dolulukYuzdesi );
+                cJSON_AddNumberToObject( healthPayload, "task_sayisi", (double) uxTaskSayisi );
+                cJSON_AddNumberToObject( healthPayload, "ts", (double) xOlcumZamani );
 
-                cJSON_AddStringToObject( healthRoot, "payload", payloadStr );
+                /* cJSON_AddItemToObject: healthPayload'i healthRoot'a "tasir" -
+                * healthPayload'i ayrica cJSON_Delete etmemize GEREK YOK, healthRoot
+                * silinince otomatik silinir (parent-child sahiplik ilişkisi). */
+                cJSON_AddItemToObject( healthRoot, "payload", healthPayload );
 
                 char *healthJson = cJSON_PrintUnformatted( healthRoot );
                 char gonderilecek[ 256 ];
@@ -761,48 +760,59 @@ static void vNetworkTask( void *pvParameters )
                             cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
                             cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
 
-                            if( topicItem != NULL && cJSON_IsString( topicItem ) &&
-                            payloadItem != NULL && cJSON_IsString( payloadItem ) )
+                            bool bPayloadGecerli = ( payloadItem != NULL ) &&
+                        ( cJSON_IsString( payloadItem ) || cJSON_IsObject( payloadItem ) );
+
+                            if( topicItem != NULL && cJSON_IsString( topicItem ) && bPayloadGecerli )
                             {
-                                /* Dogrulanan veriyi ISLEMEK yerine, Internal Comm task'ina
-                                * QUEUE uzerinden gonderiyoruz - artik bu task sadece
-                                * "network'ten veri al ve ilet" gorevini yapiyor. */
-                                SensorData_t veri;
-                                strncpy( veri.topic, topicItem->valuestring, sizeof( veri.topic ) - 1 );
-                                veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
-                                strncpy( veri.payload, payloadItem->valuestring, sizeof( veri.payload ) - 1 );
-                                veri.payload[ sizeof( veri.payload ) - 1 ] = '\0';
+                                char payloadMetni[ 128 ];
 
-                                /* portMAX_DELAY: queue doluysa, yer acilana kadar bekle.
-                                * (Simdilik dolma ihtimali cok dusuk, 10 elemanlik kapasite var.) */
-                                if( xQueueSend( xInternalCommQueue, &veri, portMAX_DELAY ) != pdPASS )
+                                if( cJSON_IsObject( payloadItem ) )
                                 {
-                                    printf( "[Network] UYARI: Veri Internal Comm queue'suna gonderilemedi.\n" );
+                                    /* system/health gibi nested JSON payload'lar icin - objeyi
+                                    * tekrar kompakt bir string'e ceviriyoruz, boylece mevcut
+                                    * SensorData_t (sabit boyutlu char[] tutan) yapisiyla uyumlu
+                                    * kaliyoruz. */
+                                    char *tempStr = cJSON_PrintUnformatted( payloadItem );
+                                    strncpy( payloadMetni, tempStr, sizeof( payloadMetni ) - 1 );
+                                    payloadMetni[ sizeof( payloadMetni ) - 1 ] = '\0';
+                                    cJSON_free( tempStr );
                                 }
-                                /* --- CROSS-INSTANCE HEALTH PERFORMANS OLCUMU ---
-                                * Eger bu bir health mesajiysa, icindeki "ts:" alanini bulup
-                                * kendi zaman damgamizla karsilastirarak GECIKME (latency)
-                                * hesapliyoruz. Bu,"farkli instance'larin
-                                * birbiriyle dis haberlesme performansi" olcumudur. */
-                                if( strcmp( topicItem->valuestring, "system/health" ) == 0 )
+                                else
                                 {
-                                    const char *tsAlani = strstr( payloadItem->valuestring, "ts:" );
+                                    strncpy( payloadMetni, payloadItem->valuestring, sizeof( payloadMetni ) - 1 );
+                                    payloadMetni[ sizeof( payloadMetni ) - 1 ] = '\0';
+                                }
 
-                                    if( tsAlani != NULL )
+                                /* --- CROSS-INSTANCE HEALTH PERFORMANS OLCUMU (guncellendi) ---
+                                * Artik ts alanini strstr ile string icinde ARAMIYORUZ - ts,
+                                * nested obje icinde GERCEK bir sayisal alan, dogrudan okuyoruz. */
+                                if( strcmp( topicItem->valuestring, "system/health" ) == 0 &&
+                                    cJSON_IsObject( payloadItem ) )
+                                {
+                                    cJSON *tsItem = cJSON_GetObjectItem( payloadItem, "ts" );
+
+                                    if( tsItem != NULL && cJSON_IsNumber( tsItem ) )
                                     {
-                                        unsigned long long uzakZaman = strtoull( tsAlani + 3, NULL, 10 );
+                                        unsigned long long uzakZaman = (unsigned long long) tsItem->valuedouble;
                                         unsigned long long yerelZaman = (unsigned long long) GetTickCount64();
-
-                                        /* NOT: Bu hesaplama, sadece iki instance AYNI FIZIKSEL
-                                        * MAKINEDE calisirken anlamlidir - cunku GetTickCount64()
-                                        * "bu bilgisayar acildigindan beri gecen sure"dir, farkli
-                                        * makinelerde senkronize degildir. */
                                         long long gecikmeMs = (long long) ( yerelZaman - uzakZaman );
 
                                         printf( "[HealthPeer] Uzak instance'in health verisi %lld ms'de ulasti.\n",
                                                 gecikmeMs );
                                     }
-                                }   
+                                }
+
+                                SensorData_t veri;
+                                strncpy( veri.topic, topicItem->valuestring, sizeof( veri.topic ) - 1 );
+                                veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
+                                strncpy( veri.payload, payloadMetni, sizeof( veri.payload ) - 1 );
+                                veri.payload[ sizeof( veri.payload ) - 1 ] = '\0';
+
+                                if( xQueueSend( xInternalCommQueue, &veri, portMAX_DELAY ) != pdPASS )
+                                {
+                                    printf( "[Network] UYARI: Veri Internal Comm queue'suna gonderilemedi.\n" );
+                                }
                             }
                             else
                             {

@@ -508,14 +508,21 @@ class BrokerMonitor:
             self._log(f"UYARI: Eksik alan iceren mesaj: {satir}")
             return
 
-        self._log(f"[{topic}] {payload}")
+        if isinstance(payload, dict):
+            # system/health gibi NESTED JSON payload'lar icin (artik
+            # duz string degil, gercek bir JSON nesnesi) okunakli bir
+            # ozet olusturup logluyoruz.
+            ozet = ", ".join(f"{k}:{v}" for k, v in payload.items())
+            self._log(f"[{topic}] {ozet}")
+        else:
+            self._log(f"[{topic}] {payload}")
 
         if topic == "system/status":
             self._update_client_count(payload)
         elif topic == "sensor/sicaklik":
             try:
                 self._update_chart(float(payload))
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
 
     def _on_close(self):
