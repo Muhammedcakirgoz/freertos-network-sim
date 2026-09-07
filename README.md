@@ -4,14 +4,14 @@ Donanımdan bağımsız, çok görevli (multi-task) bir ağ simülasyonu projesi
 
 ## Proje Amacı
 
-Bu proje, gömülü sistemlerdeki gerçek zamanlı işletim sistemi (RTOS) mantığını, görev önceliklendirmesini ve ağ haberleşmesini, fiziksel donanıma ihtiyaç duymadan bilgisayar üzerinde (localhost simülasyonu) test edilebilir hale getirmeyi hedefler. Mimari, ileride gerçek bir mikrodenetleyiciye (ESP32) taşınabilecek şekilde tasarlanmıştır — network katmanı soyutlanarak, iş mantığının donanım değişiminden etkilenmemesi sağlanmıştır.
+Bu proje, gömülü sistemlerdeki gerçek zamanlı işletim sistemi (RTOS) mantığını, görev önceliklendirmesini ve ağ haberleşmesini, fiziksel donanıma ihtiyaç duymadan bilgisayar üzerinde (localhost simülasyonu) test edilebilir hale getirmeyi hedefler. Mimari, ileride gerçek bir mikrodenetleyiciye (ESP32) taşınabilecek şekilde tasarlanmıştır.
 
 ## Mimari
 
 ```
                     ┌─────────────┐
                     │   BROKER    │
-                    │  (port 8080)│
+                    │ (port: CLI) │
                     └──────┬──────┘
                            │
               ┌────────────┼────────────┐
@@ -21,128 +21,147 @@ Bu proje, gömülü sistemlerdeki gerçek zamanlı işletim sistemi (RTOS) mant�
       └────────────────┘        └──────────────────┘
 ```
 
-Aynı çalıştırılabilir dosya (`.exe`), komut satırı argümanına göre üç farklı rolde çalışabilir:
-
 | Rol | Görev |
 |---|---|
-| `broker` | Bağlantıları kabul eder, publisher'dan gelen veriyi subscriber'lara yönlendirir |
-| `publisher` | Broker'a bağlanır, periyodik olarak veri yayınlar |
+| `broker` | Bağlantıları kabul eder, publisher'dan gelen veriyi subscriber'lara yönlendirir, sistem durumu/sağlığını yayınlar |
+| `publisher` | Broker'a bağlanır, gerçek bir veri setinden periyodik olarak veri yayınlar |
 | `subscriber` | Broker'a bağlanır, yayınlanan veriyi dinler |
 
-### FreeRTOS Task Yapısı
+### FreeRTOS Task Yapısı ve Öncelikleri
 
 | Task | Öncelik | Her Rolde mi? |
 |---|---|---|
-| Health | En yüksek | Evet |
-| Internal Comm | Yüksek | Evet |
-| Network | Orta | Evet |
-| Client Handler | Orta (sadece Broker) | Sadece Broker, her bağlanan client için dinamik olarak oluşturulur |
-| MQTT Publisher | Düşük | Sadece Publisher |
-| MQTT Subscriber | Düşük | Sadece Subscriber |
+| Health | En yüksek (5) | Evet — sistem sağlığını izler, `system/health` yayınlar |
+| Internal Comm | Yüksek (4) | Evet — Network Task'tan Queue ile veri alır |
+| Network | Orta (3) | Evet — TCP soket işlemleri |
+| Client Handler | Orta (3), dinamik | Sadece Broker, her bağlanan client için ayrı task |
+| MQTT Publisher / Subscriber | Düşük (2) | Sadece ilgili rolde |
+
+Senkronizasyon: **Queue** (task'lar arası veri aktarımı), **Mutex** (paylaşılan subscriber listesi koruması, priority inheritance ile test edilmiştir), **Software Timer** (periyodik durum yayını, ayrı task/stack gerektirmez).
 
 ## Gereksinimler
 
 - Windows işletim sistemi
 - [MSYS2](https://www.msys2.org/) (UCRT64 ortamı) — GCC derleyici, Make
 - [CMake](https://cmake.org/) (3.15+)
-- [FreeRTOS Kernel](https://github.com/FreeRTOS/FreeRTOS-Kernel) kaynak kodu (aşağıda kurulum talimatı var)
+- [FreeRTOS Kernel](https://github.com/FreeRTOS/FreeRTOS-Kernel) kaynak kodu
+- Python 3.x + Tkinter (opsiyonel kontrol paneli için — Tkinter Python ile birlikte gelir, ek kurulum gerekmez)
 
-## Kurulum
-
-### 1. Bu Depoyu Klonlayın
+## Kurulum ve Derleme
 
 ```bash
 git clone https://github.com/<kullanici-adiniz>/<repo-adi>.git
 cd <repo-adi>
-```
-
-### 2. FreeRTOS Kernel Kaynak Kodunu İndirin
-
-Bu proje, FreeRTOS kernel kaynak kodunu içermez (üçüncü parti kütüphane olduğu için repoya dahil edilmemiştir). Aşağıdaki adımlarla indirin:
-
-```bash
 git clone https://github.com/FreeRTOS/FreeRTOS-Kernel.git ../FreeRTOS-Kernel-Source
-```
-
-Ardından `CMakeLists.txt` içindeki `KERNEL_DIR` değişkenini, indirdiğiniz klasörün yolunu gösterecek şekilde güncelleyin (gerekirse).
-
-### 3. Derleyin
-
-```bash
-mkdir build
-cd build
+mkdir build && cd build
 cmake .. -G "MinGW Makefiles"
-make
+mingw32-make
 ```
+
+**Önemli:** `ankara_sicaklik_verileri.csv` dosyasının, `.exe`'nin çalıştığı `build` klasöründe de bulunması gerekir (publisher gerçek veri setini bu dosyadan okur).
 
 ## Kullanım
 
-Derleme sonrası oluşan `freertos_demo.exe` dosyasını, farklı terminallerde farklı rollerle çalıştırın:
-
-**Terminal 1 — Broker'ı başlatın (önce bu çalışmalı):**
-```bash
-./freertos_demo.exe broker
+```
+freertos_demo.exe <rol> [port] [broker_ip]
 ```
 
-**Terminal 2 — Subscriber'ı başlatın:**
+`port` ve `broker_ip` opsiyoneldir; belirtilmezse sırasıyla `8080` ve `127.0.0.1` kullanılır. Bu, aynı `.exe`'nin **farklı portlarda birden fazla instance** olarak çalıştırılabilmesini sağlar.
+
+**Terminal 1 — Broker:**
 ```bash
-./freertos_demo.exe subscriber
+./freertos_demo.exe broker 8080
 ```
 
-**Terminal 3 — Publisher'ı başlatın:**
+**Terminal 2 — Subscriber:**
 ```bash
-./freertos_demo.exe publisher
+./freertos_demo.exe subscriber 8080
 ```
 
-Publisher'ın gönderdiği verinin, broker üzerinden subscriber'a ulaştığını, subscriber terminalinde göreceksiniz.
+**Terminal 3 — Publisher:**
+```bash
+./freertos_demo.exe publisher 8080
+```
 
-## Şu Ana Kadar Tamamlananlar
-
-- [x] Rol bazlı (broker/publisher/subscriber) modüler task mimarisi
-- [x] Non-blocking TCP soket haberleşmesi (accept/connect)
-- [x] Her bağlanan client için dinamik FreeRTOS task oluşturma
-- [x] Mutex ile korunan subscriber listesi
-- [x] Publisher → Broker → Subscriber uçtan uca veri akışı
-- [x] Authentication: token bazlı bağlantı doğrulama
-- [x] Authorization: rol bazlı yetki kontrolü (subscriber'ın publish edememesi)
-- [x] TCP framing çözümü (mesaj sınırlarının `\n` ayracı ile belirlenmesi)
-- [x] Temel veri doğrulama (recv hata kodu ayrımı, boş/aşırı uzun mesaj reddi)
-- [x] JSON mesaj formatına geçiş (cJSON kütüphanesi ile)
-- [x] JSON format/schema doğrulaması (parse hatası, eksik/yanlış tipte alan kontrolü)
-- [x] Broker durumunu ve sensör verisini izleyen bağımsız Python/Tkinter monitor aracı
-
-## Monitor Aracı (İzleme Paneli)
-
-Projeye, broker'ı **normal bir subscriber gibi** dinleyen, bağımsız bir Python/Tkinter masaüstü aracı eklenmiştir. Bu araç, FreeRTOS/C kod tabanından tamamen ayrıdır — sadece TCP soket üzerinden broker'a bağlanıp standart JSON protokolünü okur. Bu tasarım, gerçek endüstriyel sistemlerdeki "cihaz verisini bir SCADA/dashboard yazılımıyla izleme" desenini birebir yansıtmaktadır.
-
-**Özellikler:**
-- Bağlı subscriber sayısının canlı gösterimi (`system/status` topic'i üzerinden)
-- Sensör verisinin (`sensor/sicaklik` topic'i) gerçek zamanlı çizgi grafiği
-- Gelen mesajların log akışı
-
-**Çalıştırma:**
+### Python Kontrol Paneli (Önerilir)
 
 ```bash
 python monitor.py
 ```
 
-Ek kütüphane kurulumu gerekmez — araç, yalnızca Python'ın standart kütüphanelerini (`socket`, `json`, `threading`, `tkinter`) kullanır. Broker'ın çalışıyor olması ve `monitor.py` içindeki `AUTH_TOKEN` değerinin, `main.c`'deki `SHARED_AUTH_TOKEN` ile aynı olması gerekmektedir.
+Broker/Publisher/Subscriber süreçlerini **tek bir pencereden** başlatıp durdurmayı, her sürecin canlı logunu ayrı panellerde izlemeyi ve bağımsız bir "Canlı İzleme" sekmesinde sensör verisi grafiğini gerçek zamanlı görmeyi sağlar. `monitor.py`'nin en üstündeki `EXE_PATH` değişkenini kendi `freertos_demo.exe` konumunuza göre güncelleyin.
 
-## Yol Haritası (Devam Eden Çalışma)
+## Mesaj Formatı
 
-- [ ] Internal Comm task'ı ile Network task'ı arasında Queue kullanımı
-- [ ] Priority Inversion testleri (mutex + öncelik önceliklendirmesi senaryoları)
-- [ ] ESP32 platformuna taşınabilirlik (network katmanının soyutlanması)
-- [ ] cJSON parse/doğrulama mantığının ortak bir yardımcı fonksiyona çıkarılması (kod tekrarını azaltmak için)
+Sistem, veri taşımak için JSON formatını kullanır. Her mesajın sonuna, mesaj sınırlarını belirlemek amacıyla bir satır sonu karakteri (`\n`) eklenir — authentication mesajı da dahil olmak üzere **tüm** haberleşme bu çerçeveleme (framing) mekanizmasından geçer.
+
+**Sensör verisi (`sensor/sicaklik`):**
+```json
+{"topic":"sensor/sicaklik","payload":"5.5","mesaj_no":0,"tarih":"2026-03-26","nem":"83"}
+```
+
+**Sistem durumu (`system/status`, 2 saniyede bir):**
+```json
+{"topic":"system/status","payload":"1"}
+```
+
+**Sistem sağlığı (`system/health`, 5 saniyede bir):**
+```json
+{"topic":"system/health","payload":"heap:485040,min_heap:484592,doluluk:%4,task_sayisi:6,ts:1204982"}
+```
+
+Broker ve subscriber, gelen JSON verisini `cJSON_Parse()` ile ayrıştırıp `topic`/`payload` alanlarının varlığını ve tipini doğrular; geçersiz veya eksik veriler işlenmeden reddedilir.
+
+## Gerçek Veri Seti
+
+Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek ve kaynağı belirtilmiş** bir sıcaklık/nem veri setinden (`ankara_sicaklik_verileri.csv`, 27 kayıt) sırayla okuma yapar. Veri, üç farklı meteorolojik kaynaktan derlenmiştir:
+
+- **UK Met Office** (resmi gözlem istasyonu, Ankara/Esenboğa) — saatlik gerçek ölçümler, 26-28 Mart 2026
+- **aqi.in / Yenisafak English** — günlük hava durumu kayıtları, Ağustos 2026
+- **climate-data.org** — aylık iklim normalleri (1991-2021 dönemi)
+
+Dosya bulunamazsa, sistem otomatik olarak eski (rastgele) veri üretim yöntemine döner — bu sayede program veri seti olmadan da çalışmaya devam eder.
+
+## Güvenlik
+
+- **Authentication:** Token bazlı bağlantı doğrulama (`AUTH:token|ROLE:rol` formatı, framing mekanizmasının bir parçası)
+- **Authorization:** Subscriber rolündeki bir client'ın veri göndermesi (publish etmesi) engellenir, "yetki ihlali" olarak loglanır
+
+## Tamamlanan Özellikler
+
+- [x] Rol bazlı (broker/publisher/subscriber) modüler task mimarisi
+- [x] Non-blocking TCP soket haberleşmesi, çoklu client desteği (her biri ayrı task)
+- [x] TCP framing çözümü (mesaj sınırlarının `\n` ile belirlenmesi, authentication dahil)
+- [x] Authentication ve Authorization
+- [x] cJSON ile tam JSON mesajlaşma, format/schema doğrulaması
+- [x] Queue mimarisi (hem publish hem subscribe yönünde)
+- [x] Mutex ile korunan paylaşılan veri, **priority inheritance kanıtlanmıştır** (mutex vs semaphore karşılaştırmalı test — mutex ile gecikme sınırlı kalırken, semaphore ile sınırsız beklemeye/kilitlenmeye yol açmaktadır)
+- [x] Software Timer entegrasyonu
+- [x] Gelişmiş sistem sağlık yönetimi (heap analizi, stack high water mark, görev durumu izleme), `system/health` ile ağa yayınlanır
+- [x] Çoklu instance desteği (port/broker IP komut satırı argümanı)
+- [x] Instance'lar arası health veri gecikmesi ölçümü (~100-125 ms, aynı makinede)
+- [x] Python/Tkinter görsel kontrol paneli (süreç yönetimi + canlı izleme)
+- [x] Gerçek, kaynaklı bir veri setinden sensör verisi üretimi
+
+## Bilinen Kısıtlamalar
+
+FreeRTOS Windows Simulator portu, gerçekçi tek-çekirdekli zamanlama sağlamak amacıyla her görev iş parçacığını `SetThreadAffinityMask()` ile CPU'nun 0. çekirdeğine sabitlemekte ve işlem önceliğini `REALTIME_PRIORITY_CLASS` olarak ayarlamaktadır. Bu, **aynı fiziksel makinede birden fazla instance'ın eş zamanlı çalıştırılmasını** sınırlamaktadır (instance'lar aynı çekirdek için rekabet eder). Bu davranış, gerçek donanımda (her cihazın kendi bağımsız işlemcisine sahip olduğu bir senaryoda, örn. ESP32) yaşanmayacaktır; çoklu instance testleri farklı fiziksel makinelerde/VM'lerde sorunsuz çalışır.
+
+## Yol Haritası
+
+- [ ] ESP32'ye taşınabilirlik (network katmanının soyutlanması)
+- [ ] Gerçek zamanlı bir hava durumu API'sinden canlı veri çekme
+- [ ] Stack boyutu deneyleri, idle-timeout timer, MQTT'den bağımsız haberleşme kanalı
 
 ## Proje Yapısı
 
 ```
 .
-├── main.c              # Ana uygulama kodu (task tanımları, network mantığı)
-├── CMakeLists.txt       # Derleme yapılandırması
-├── FreeRTOSConfig.h     # FreeRTOS kernel yapılandırma ayarları
-├── monitor.py           # Bağımsız Python/Tkinter izleme aracı
+├── main.c                          # Ana uygulama kodu
+├── CMakeLists.txt                   # Derleme yapılandırması
+├── FreeRTOSConfig.h                 # FreeRTOS kernel yapılandırma ayarları
+├── monitor.py                       # Python/Tkinter kontrol paneli
+├── ankara_sicaklik_verileri.csv     # Gerçek sensör veri seti
 ├── cJSON/
 │   ├── cJSON.c
 │   └── cJSON.h
@@ -151,14 +170,4 @@ Ek kütüphane kurulumu gerekmez — araç, yalnızca Python'ın standart kütü
 
 ## Notlar
 
-Bu proje, bir staj programı kapsamında, gömülü sistemlerdeki RTOS ve ağ haberleşmesi kavramlarını öğrenmek amacıyla geliştirilmektedir.
-
-## Mesaj Formatı
-
-Sistem, veri taşımak için JSON formatını kullanır:
-
-```json
-{"topic":"sensor/sicaklik","payload":"24.1","mesaj_no":0}
-```
-
-Mesajlar TCP üzerinden gönderilirken, mesaj sınırlarını belirlemek amacıyla her mesajın sonuna bir satır sonu karakteri (`\n`) eklenir. Broker ve subscriber, gelen JSON verisini `cJSON_Parse()` ile ayrıştırıp gerekli alanların (`topic`, `payload`) varlığını ve tipini doğrular; geçersiz veya eksik veriler işlenmeden reddedilir.
+Bu proje, bir staj programı kapsamında, gömülü sistemlerdeki RTOS ve ağ haberleşmesi kavramlarını (task senkronizasyonu, priority inversion, sistem sağlık yönetimi, ağ protokolü tasarımı) uygulamalı olarak öğrenmek amacıyla geliştirilmektedir.
