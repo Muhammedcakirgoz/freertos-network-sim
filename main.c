@@ -13,13 +13,14 @@
 #include <stdbool.h>
 #include "timers.h"
 
-#define MAX_SICAKLIK_KAYIT 32
+#define MAX_SICAKLIK_KAYIT 1100   
 
 typedef struct
 {
+    char sehir[ 24 ];
     char tarih[ 16 ];
     float sicaklik;
-    float nem;
+    char durum[ 40 ];
 } SicaklikKaydi_t;
 
 static SicaklikKaydi_t xSicaklikVerileri[ MAX_SICAKLIK_KAYIT ];
@@ -50,8 +51,9 @@ typedef struct
     char topic[ 64 ];
     char payload[ 16 ];
     int  mesaj_no;
+    char sehir[ 24 ];
     char tarih[ 16 ];
-    char nem[ 8 ];
+    char durum[ 40 ];
 } PublishData_t;
 
 static QueueHandle_t xInternalCommQueue = NULL;
@@ -106,6 +108,7 @@ static TaskHandle_t xMqttSubscriberTaskHandle  = NULL;
 static TimerHandle_t xStatusTimer = NULL;
 static TimerHandle_t xIdleTimeoutTimer = NULL;
 static TickType_t xSonBaglantiZamani = 0;
+static volatile int xAktifClientSayisi = 0;
 static bool bBilerekKapatiliyor = false;
 /* Komut satirindan override edilebilen ag ayarlari. Varsayilan
  * degerlerle baslar, prvParseNetworkArgsFromArgs() cagrildiginda
@@ -294,10 +297,11 @@ static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
     while( fgets( satir, sizeof( satir ), fp ) != NULL &&
            xSicaklikKayitSayisi < MAX_SICAKLIK_KAYIT )
     {
-        if( sscanf( satir, "%15[^,],%f,%f",
-                    xSicaklikVerileri[ xSicaklikKayitSayisi ].tarih,
-                    &xSicaklikVerileri[ xSicaklikKayitSayisi ].sicaklik,
-                    &xSicaklikVerileri[ xSicaklikKayitSayisi ].nem ) == 3 )
+        if( sscanf( satir, "%23[^,],%15[^,],%f,%39[^\r\n]",
+            xSicaklikVerileri[ xSicaklikKayitSayisi ].sehir,
+            xSicaklikVerileri[ xSicaklikKayitSayisi ].tarih,
+            &xSicaklikVerileri[ xSicaklikKayitSayisi ].sicaklik,
+            xSicaklikVerileri[ xSicaklikKayitSayisi ].durum ) == 4 )
         {
             xSicaklikKayitSayisi++;
         }
@@ -757,8 +761,9 @@ static void vNetworkTask( void *pvParameters )
                     cJSON_AddStringToObject( root, "topic", gelenVeri.topic );
                     cJSON_AddStringToObject( root, "payload", gelenVeri.payload );
                     cJSON_AddNumberToObject( root, "mesaj_no", gelenVeri.mesaj_no );
+                    cJSON_AddStringToObject( root, "sehir", gelenVeri.sehir );
                     cJSON_AddStringToObject( root, "tarih", gelenVeri.tarih );
-                    cJSON_AddStringToObject( root, "nem", gelenVeri.nem );
+                    cJSON_AddStringToObject( root, "durum", gelenVeri.durum );
 
                     char *jsonString = cJSON_PrintUnformatted( root );
 
@@ -918,6 +923,7 @@ static void vClientHandlerTask( void *pvParameters )
 
     printf( "[ClientHandler] Yeni client task'i basladi (socket: %d)\n",
             (int) clientSocket );
+            xAktifClientSayisi++;
 
     u_long ulMode = 1;
     ioctlsocket( clientSocket, FIONBIO, &ulMode );
@@ -1112,11 +1118,20 @@ static void vClientHandlerTask( void *pvParameters )
 
         vTaskDelay( pdMS_TO_TICKS( 100 ) );
     }
+    xAktifClientSayisi--;
+    if( xAktifClientSayisi == 0 )
+    {
+        /* Son client de ayrildi - idle sayaci SIMDI, bu andan itibaren
+        * baslasin. */
+        xSonBaglantiZamani = xTaskGetTickCount();
+    }
+
 
     closesocket( clientSocket );
     printf( "[ClientHandler] Task sonlandiriliyor.\n" );
     vTaskDelete( NULL );
 }
+
 
 /* =======================================================================
  * vUdpCommandTask()
@@ -1146,7 +1161,10 @@ static void vUdpCommandTask( void *pvParameters )
     memset( &udpAddr, 0, sizeof( udpAddr ) );
     udpAddr.sin_family      = AF_INET;
     udpAddr.sin_addr.s_addr = INADDR_ANY;
-    udpAddr.sin_port        = htons( (uint16_t) ( xPortNumarasi + 1000 ) );
+    /* Her ROL, kendi BENZERSIZ UDP portunu alsin - boylece ayni makinede
+    * broker/publisher/subscriber ayni anda calisirken portlari
+    * CAKISMASIN. Rol numarasina gore ek bir ofset ekliyoruz. */
+    udpAddr.sin_port = htons( (uint16_t) ( xPortNumarasi + 1000 + ( (int) xMyRole * 10 ) ) );
 
     if( bind( udpSocket, (struct sockaddr *) &udpAddr, sizeof( udpAddr ) ) == SOCKET_ERROR )
     {
@@ -1159,7 +1177,7 @@ static void vUdpCommandTask( void *pvParameters )
     ioctlsocket( udpSocket, FIONBIO, &ulMode );
 
     printf( "[UdpCmd] MQTT'den BAGIMSIZ komut kanali - UDP port %d'de dinlemede...\n",
-            xPortNumarasi + 1000 );
+        xPortNumarasi + 1000 + ( (int) xMyRole * 10 ) );
 
     char recvBuf[ 64 ];
 
@@ -1271,13 +1289,18 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer )
 static void vIdleTimeoutCallback( TimerHandle_t xTimer )
 {
     ( void ) xTimer;
+     /* En az bir client hala bagliysa, idle sayilmaz - hemen cik. */
+    if( xAktifClientSayisi > 0 )
+    {
+        return;
+    }
 
     TickType_t suankiZaman = xTaskGetTickCount();
     TickType_t gecenSure   = suankiZaman - xSonBaglantiZamani;
 
     if( gecenSure > pdMS_TO_TICKS( IDLE_TIMEOUT_MS ) )
     {
-        printf( "\n[IdleTimeout] %lu saniyedir hic yeni baglanti gelmedi - "
+        printf( "\n[IdleTimeout] %lu saniyedir hic aktif client yok - "
                 "broker kendini kapatiyor...\n",
                 (unsigned long) ( gecenSure * portTICK_PERIOD_MS / 1000 ) );
 
@@ -1304,39 +1327,41 @@ static void vMqttPublisherTask( void *pvParameters )
 
         /* --- Sahte veri yerine, GERCEK veri setinden SIRAYLA oku --- */
         float gercekDeger;
+        char gercekSehir[ 24 ] = "bilinmiyor";
         char gercekTarih[ 16 ] = "bilinmiyor";
-        float gercekNem = 0.0f;
+        char gercekDurum[ 40 ] = "bilinmiyor";
 
         if( xSicaklikKayitSayisi > 0 )
         {
             static int xVeriIndeksi = 0;
 
             gercekDeger = xSicaklikVerileri[ xVeriIndeksi ].sicaklik;
-            gercekNem   = xSicaklikVerileri[ xVeriIndeksi ].nem;
+            strncpy( gercekSehir, xSicaklikVerileri[ xVeriIndeksi ].sehir, sizeof( gercekSehir ) - 1 );
             strncpy( gercekTarih, xSicaklikVerileri[ xVeriIndeksi ].tarih, sizeof( gercekTarih ) - 1 );
+            strncpy( gercekDurum, xSicaklikVerileri[ xVeriIndeksi ].durum, sizeof( gercekDurum ) - 1 );
 
-            printf( "[MqttPub] Gercek veri kullaniliyor: %s tarihli kayit\n", gercekTarih );
+            printf( "[MqttPub] Gercek veri kullaniliyor: %s, %s tarihli kayit\n", gercekSehir, gercekTarih );
 
             xVeriIndeksi = ( xVeriIndeksi + 1 ) % xSicaklikKayitSayisi;
         }
         else
         {
-            /* Veri seti yuklenemediyse, eski (rastgele) yonteme geri don. */
             gercekDeger = 20.0f + ( rand() % 100 ) / 10.0f;
-            gercekNem   = 50.0f;
+            strncpy( gercekDurum, "bilinmiyor", sizeof( gercekDurum ) - 1 );
         }
 
         snprintf( veri.payload, sizeof( veri.payload ), "%.1f", gercekDeger );
+        strncpy( veri.sehir, gercekSehir, sizeof( veri.sehir ) - 1 );
         strncpy( veri.tarih, gercekTarih, sizeof( veri.tarih ) - 1 );
-        snprintf( veri.nem, sizeof( veri.nem ), "%.0f", gercekNem );
+        strncpy( veri.durum, gercekDurum, sizeof( veri.durum ) - 1 );
 
         strncpy( veri.topic, "sensor/sicaklik", sizeof( veri.topic ) - 1 );
         veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
 
         veri.mesaj_no = mesajSayaci;
 
-        printf( "[MqttPub] Veri uretildi: %s = %s, nem: %s%% (no: %d)\n",
-                veri.topic, veri.payload, veri.nem, mesajSayaci );
+        printf( "[MqttPub] Veri uretildi: %s (%s) = %s, durum: %s (no: %d)\n",
+        veri.topic, veri.sehir, veri.payload, veri.durum, mesajSayaci );
 
         /* Ureteni Network Task'a TESLIM ET - JSON'a cevirme ve
          * gonderme islerine hic karismiyoruz, o Network Task'in isi. */

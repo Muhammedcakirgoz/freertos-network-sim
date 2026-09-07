@@ -134,6 +134,15 @@ class ProcessPanel:
             # gosterecegiz, ayri bir siyah pencereye gerek yok.
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+            # cwd: process'in CALISMA DIZINI, EXE_PATH'in bulundugu
+            # klasore sabitleniyor. Bu KRITIK - aksi halde process,
+            # monitor.py'nin calistirildigi dizini "calisma dizini"
+            # sanip, ankara_sicaklik_verileri.csv gibi RELATIF
+            # yollarla acilan dosyalari BULAMAZ (terminalden "cd build"
+            # yapip calistirdiginda calisan ayni dosya, Python'dan
+            # baslatilinca "bulunamadi" der - sebebi budur).
+            exe_klasoru = os.path.dirname(EXE_PATH) or "."
+
             self.process = subprocess.Popen(
                 [EXE_PATH, self.role_arg],
                 stdout=subprocess.PIPE,
@@ -141,6 +150,7 @@ class ProcessPanel:
                 text=True,
                 bufsize=1,
                 creationflags=creationflags,
+                cwd=exe_klasoru,
             )
         except Exception as e:
             self._append_log(f"HATA: Baslatilamadi: {e}\n")

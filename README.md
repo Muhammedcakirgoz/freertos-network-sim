@@ -97,7 +97,7 @@ Sistem, veri taşımak için JSON formatını kullanır. Her mesajın sonuna, me
 
 **Sensör verisi (`sensor/sicaklik`):**
 ```json
-{"topic":"sensor/sicaklik","payload":"5.5","mesaj_no":0,"tarih":"2026-03-26","nem":"83"}
+{"topic":"sensor/sicaklik","payload":"13.0","mesaj_no":0,"sehir":"Istanbul","tarih":"2024-11-15","durum":"Orta kuvvetli yagmurlu"}
 ```
 
 **Sistem durumu (`system/status`, 2 saniyede bir):**
@@ -142,13 +142,15 @@ Broker, belirlenen bir süre boyunca (varsayılan 30 saniye, `IDLE_TIMEOUT_MS` i
 
 ## Gerçek Veri Seti
 
-Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek ve kaynağı belirtilmiş** bir sıcaklık/nem veri setinden (`ankara_sicaklik_verileri.csv`, 27 kayıt) sırayla okuma yapar. Veri, üç farklı meteorolojik kaynaktan derlenmiştir:
+Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek, kaynağı belirtilmiş** bir hava durumu veri setinden (`ankara_sicaklik_verileri.csv`, **1022 kayıt, 68 şehir**) sırayla okuma yapar. Her yayınlanan mesaj, gerçek bir şehir, tarih, sıcaklık ve hava durumu açıklaması taşır — bu sayede sistem, Türkiye çapında dağıtık bir sensör ağını simüle eder.
 
-- **UK Met Office** (resmi gözlem istasyonu, Ankara/Esenboğa) — saatlik gerçek ölçümler, 26-28 Mart 2026
-- **aqi.in / Yenisafak English** — günlük hava durumu kayıtları, Ağustos 2026
-- **climate-data.org** — aylık iklim normalleri (1991-2021 dönemi)
+**Kaynak:** Kaggle — "Türkiye Hava Durumu Verisi (Kasım 2024)" (68 il, 15-28 Kasım 2024 arası günlük gözlemler).
 
-Dosya bulunamazsa, sistem otomatik olarak eski (rastgele) veri üretim yöntemine döner — bu sayede program veri seti olmadan da çalışmaya devam eder.
+**Notlar:**
+- Hava durumu açıklamalarındaki Türkçe karakterler (ş, ç, ğ, ı, ü, ö), C'de sabit boyutlu buffer'larda UTF-8 çok baytlı karakterlerin bozulma riskini önlemek amacıyla ASCII'ye çevrilmiştir (örn. `"Bölgesel"` → `"Bolgesel"`).
+- Veri seti döngüsel olarak okunur; 1022 kaydın tamamını bir kez dolaşmak (3 saniyelik yayın periyodunda) yaklaşık 51 dakika sürer.
+- Dosya bulunamazsa, sistem otomatik olarak eski (rastgele) veri üretim yöntemine döner — bu sayede program veri seti olmadan da çalışmaya devam eder.
+- Python Kontrol Paneli üzerinden başlatılan süreçlerin de bu dosyayı doğru bulabilmesi için, `subprocess.Popen` çağrısında çalışma dizini (`cwd`) `.exe` dosyasının bulunduğu klasöre sabitlenmiştir.
 
 ## Güvenlik
 
@@ -169,7 +171,7 @@ Dosya bulunamazsa, sistem otomatik olarak eski (rastgele) veri üretim yöntemin
 - [x] Çoklu instance desteği (port/broker IP komut satırı argümanı)
 - [x] Instance'lar arası health veri gecikmesi ölçümü (~100-125 ms, aynı makinede)
 - [x] Python/Tkinter görsel kontrol paneli (süreç yönetimi + canlı izleme)
-- [x] Gerçek, kaynaklı bir veri setinden sensör verisi üretimi
+- [x] Gerçek, kaynaklı bir veri setinden (1022 kayıt, 68 şehir) sensör verisi üretimi
 - [x] MQTT/TCP/JSON altyapısından bağımsız UDP komut kanalı (PING/HEAP/STATUS)
 - [x] Broker'ın idle-timeout ile kendini düzgün şekilde kapatabilmesi
 
