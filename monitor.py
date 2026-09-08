@@ -527,6 +527,15 @@ class BrokerMonitor:
         else:
             self._log(f"[{topic}] {payload}")
 
+        # --- GECICI DOGRULAMA SATIRI ---
+        # topic/payload DISINDAKI tum ekstra alanlari (zaman, sehir,
+        # tarih, durum vb.) da goruntuluyoruz - NTP zaman damgasinin
+        # gercekten JSON icinde geldigini dogrulamak icin eklendi.
+        # Dogrulama bittikten sonra bu blok kaldirilabilir.
+        ekstra_alanlar = {k: v for k, v in veri.items() if k not in ("topic", "payload")}
+        if ekstra_alanlar:
+            self._log(f"    -> ekstra alanlar: {ekstra_alanlar}")
+
         if topic == "system/status":
             self._update_client_count(payload)
         elif topic == "sensor/sicaklik":

@@ -296,6 +296,30 @@ int main( int argc, char *argv[] )
 
     /* 2) ADIM: Role uygun task'lari olustur. */
     prvCreateTasksForRole( xMyRole );
+    
+    /* Scheduler baslamadan ONCE, bir kez BLOKLAYICI NTP sorgusu yaparak
+    * ilk senkronizasyonu garanti altina aliyoruz. Boylece hicbir task
+    * (ozellikle publisher) calismaya baslamadan once, xUnixZamanOfseti
+    * zaten dogru deger ile dolu oluyor - "zaman: 0" gibi anlamsiz ilk
+    * mesajlarin onune geciliyor. */
+    {
+        time_t ilkSenkronZamani;
+
+        printf( "[NTP] Baslangic senkronizasyonu yapiliyor...\n" );
+
+        if( prvNtpSorgula( &ilkSenkronZamani ) )
+        {
+            xUnixZamanOfseti = ilkSenkronZamani;   /* tick henuz 0'a yakin, offset ~= sunucu zamani */
+            bNtpSenkronize = true;
+            printf( "[NTP] Baslangic senkronizasyonu basarili.\n" );
+        }
+        else
+        {
+            printf( "[NTP] UYARI: Baslangic senkronizasyonu basarisiz - "
+                    "vNtpSyncTask periyodik olarak tekrar deneyecek.\n" );
+        }
+    }
+
 
     /* 3) ADIM: Scheduler'i baslat - bu satirdan sonra kontrol
      *    bir daha asla buraya donmez. */
@@ -743,6 +767,14 @@ static void vHealthTask( void *pvParameters )
                 cJSON_AddNumberToObject( healthPayload, "doluluk", dolulukYuzdesi );
                 cJSON_AddNumberToObject( healthPayload, "task_sayisi", (double) uxTaskSayisi );
                 cJSON_AddNumberToObject( healthPayload, "ts", (double) xOlcumZamani );
+
+                /* YENI: NTP ile senkronize edilmis GERCEK zaman (Unix timestamp).
+                * "ts" alani (GetTickCount64 tabanli) sadece AYNI MAKINEDEKI
+                * instance'lar arasi gecikme olcumu icin - "zaman" ise NTP'den gelen,
+                * DUNYA CAPINDA anlamli, gercek zamandir. Ikisi FARKLI amaclar icin,
+                * ikisini de tutuyoruz. */
+                cJSON_AddNumberToObject( healthPayload, "zaman", (double) prvSuankiUnixZaman() );
+
 
                 /* cJSON_AddItemToObject: healthPayload'i healthRoot'a "tasir" -
                 * healthPayload'i ayrica cJSON_Delete etmemize GEREK YOK, healthRoot
@@ -1447,6 +1479,11 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer )
     char sayiStr[ 16 ];
     snprintf( sayiStr, sizeof( sayiStr ), "%d", xSubscriberCount );
     cJSON_AddStringToObject( statusRoot, "payload", sayiStr );
+
+    /* YENI: NTP ile senkronize edilmis gercek zaman - tutarlilik icin
+    * diger tum mesaj tiplerinde (sensor/sicaklik, system/health) oldugu
+    * gibi burada da ekleniyor. */
+    cJSON_AddNumberToObject( statusRoot, "zaman", (double) prvSuankiUnixZaman() );
 
     char *statusJson = cJSON_PrintUnformatted( statusRoot );
     char gonderilecek[ 300 ];
