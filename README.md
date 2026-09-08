@@ -16,9 +16,9 @@ Bu proje, gömülü sistemlerdeki gerçek zamanlı işletim sistemi (RTOS) mant�
                            │
               ┌────────────┼────────────┐
               │                         │
-      ┌───────▼───────┐        ┌────────▼────────┐
-      │   PUBLISHER    │        │   SUBSCRIBER     │
-      └────────────────┘        └──────────────────┘
+      ┌───────▼────────┐        ┌────────▼────────┐
+      │   PUBLISHER    │        │   SUBSCRIBER    │
+      └────────────────┘        └─────────────────┘
 ```
 
 | Rol | Görev |
@@ -97,8 +97,10 @@ Sistem, veri taşımak için JSON formatını kullanır. Her mesajın sonuna, me
 
 **Sensör verisi (`sensor/sicaklik`):**
 ```json
-{"topic":"sensor/sicaklik","payload":"13.0","mesaj_no":0,"sehir":"Istanbul","tarih":"2024-11-15","durum":"Orta kuvvetli yagmurlu"}
+{"topic":"sensor/sicaklik","payload":"13.0","mesaj_no":0,"sehir":"Istanbul","tarih":"2024-11-15","durum":"Orta kuvvetli yagmurlu","zaman":1788853962}
 ```
+
+`zaman`, NTP ile senkronize edilmiş gerçek Unix zaman damgasıdır (aşağıdaki "NTP ile Gerçek Zaman Senkronizasyonu" bölümüne bakın) — mesajın **gerçekte hangi anda üretildiğini** gösterir.
 
 **Sistem durumu (`system/status`, 2 saniyede bir):**
 ```json
