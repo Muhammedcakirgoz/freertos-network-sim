@@ -48,7 +48,7 @@
 #define configMINIMAL_STACK_SIZE				( ( unsigned short ) 70 ) /* In this simulated case, the stack only has to hold one small structure as the real stack is part of the win32 thread. */
 #define configTOTAL_HEAP_SIZE					( ( size_t ) ( 490 * 1024 ) ) /* This demo tests heap_5 so places multiple blocks within this total heap size.  See mainREGION_1_SIZE to mainREGION_3_SIZE definitions in main.c. */
 #define configMAX_TASK_NAME_LEN					( 12 )
-#define configUSE_TRACE_FACILITY				0
+#define configUSE_TRACE_FACILITY				1
 #define configIDLE_SHOULD_YIELD					1
 #define configUSE_MUTEXES						1
 #define configCHECK_FOR_STACK_OVERFLOW			2

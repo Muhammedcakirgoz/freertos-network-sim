@@ -16,9 +16,9 @@ Bu proje, gömülü sistemlerdeki gerçek zamanlı işletim sistemi (RTOS) mant�
                            │
               ┌────────────┼────────────┐
               │                         │
-      ┌───────▼────────┐        ┌────────▼────────┐
-      │   PUBLISHER    │        │   SUBSCRIBER    │
-      └────────────────┘        └─────────────────┘
+      ┌───────▼───────┐        ┌────────▼────────┐
+      │   PUBLISHER    │        │   SUBSCRIBER     │
+      └────────────────┘        └──────────────────┘
 ```
 
 | Rol | Görev |
@@ -46,6 +46,8 @@ Senkronizasyon: **Queue** (task'lar arası veri aktarımı), **Mutex** (paylaş�
 - [CMake](https://cmake.org/) (3.15+)
 - [FreeRTOS Kernel](https://github.com/FreeRTOS/FreeRTOS-Kernel) kaynak kodu
 - Python 3.x + Tkinter (opsiyonel kontrol paneli için — Tkinter Python ile birlikte gelir, ek kurulum gerekmez)
+- **WinHTTP** (Windows'la birlikte gelir, ek kurulum gerekmez) — Open-Meteo API entegrasyonu için
+- **İnternet bağlantısı** — NTP senkronizasyonu ve Open-Meteo API sorguları için gereklidir (bağlantı yoksa sistem, sırasıyla eski rastgele veri üretimine ve varsayılan davranışlara döner, çökmez)
 
 ## Kurulum ve Derleme
 
@@ -58,9 +60,12 @@ cmake .. -G "MinGW Makefiles"
 mingw32-make
 ```
 
-**Önemli:** `ankara_sicaklik_verileri.csv` dosyasının, `.exe`'nin çalıştığı `build` klasöründe de bulunması gerekir (publisher gerçek veri setini bu dosyadan okur).
+**Önemli:** Aşağıdaki dosyaların, `.exe`'nin çalıştığı `build` klasöründe de bulunması gerekir:
+- `ankara_sicaklik_verileri.csv` — publisher'ın okuduğu gerçek sensör veri seti
+- `sehir_config.json` — anlık hava durumu sorgusu için varsayılan şehir
 
 ## Kullanım
+
 
 ```
 freertos_demo.exe <rol> [port] [broker_ip]
@@ -142,6 +147,57 @@ $udp.Close()
 
 Broker, belirlenen bir süre boyunca (varsayılan 30 saniye, `IDLE_TIMEOUT_MS` ile ayarlanabilir) hiç yeni bağlantı kabul etmezse, kendini düzgün bir şekilde kapatır. Bu özellik geliştirilirken, FreeRTOS'un `vTaskEndScheduler()` fonksiyonunun Windows Simulator portunda **tam olarak çalışmadığı** (bazı görevlerin, port her FreeRTOS task'ını gerçek bir Windows thread'i olarak çalıştırdığı için, scheduler durdurulsa dahi çalışmaya devam ettiği) tespit edilmiş; bunun yerine `exit()` ile doğrudan process sonlandırma kullanılmıştır.
 
+## NTP ile Gerçek Zaman Senkronizasyonu
+
+Sistem, her rolde çalışan bağımsız bir görev (`vNtpSyncTask`) aracılığıyla, gerçek dünya zamanını `pool.ntp.org` NTP sunucusundan alıp yerel olarak işletir. Bu, FreeRTOS'un kendi tick sayacının (`xTaskGetTickCount()`), her makinede farklı bir referans noktasından (o makinenin açılış anından) başlaması nedeniyle, tek başına **gerçek zaman anlamına gelmemesi** sorununu çözer — daha önce cross-instance health gecikme ölçümünde bu kısıtlama (`GetTickCount64()`'ün yalnızca aynı fiziksel makinede anlamlı olması) not edilmişti.
+
+**Çalışma prensibi:**
+1. **DNS çözümleme:** `getaddrinfo()` ile `pool.ntp.org` domaini IP adresine çevrilir.
+2. **UDP ile NTP sorgusu:** Standart 48 byte'lık NTP paket formatı (RFC 5905) kullanılarak sunucuya istek gönderilir, cevaptaki `txTm_s` (transmit timestamp) alanı okunur.
+3. **1900 → 1970 dönüşümü:** NTP zamanı 1900'den itibaren sayıldığı için, Unix zaman damgasına (1970 referanslı) çevrilirken sabit bir fark (2.208.988.800 saniye) çıkarılır.
+4. **Yerel "real-time clock":** Alınan zaman ile o anki tick sayacı arasındaki fark (ofset) saklanır; bu sayede her yeni zaman ihtiyacında ağa tekrar gidilmeden, tick sayacından anlık gerçek zaman hesaplanabilir.
+5. **Periyodik yeniden senkronizasyon:** Olası saat kaymasını (drift) düzeltmek amacıyla, senkronizasyon her 5 dakikada bir (`NTP_SYNC_INTERVAL_MS`) otomatik olarak tekrarlanır.
+
+Elde edilen Unix zaman damgası, publisher'ın yayınladığı her JSON mesajına (`sensor/sicaklik`, `system/status`, `system/health`) `zaman` alanı olarak eklenir — bu sayede her mesajın **gerçekte hangi anda üretildiği**, dış dünyayla (diğer sistemler, log analiz araçları vb.) tutarlı bir referansla izlenebilir.
+
+## Open-Meteo API Entegrasyonu — Anlık Şehir Sıcaklığı
+
+Kaggle veri setinin sağladığı tarihsel/kaydedilmiş verilere ek olarak, sistem **gerçek zamanlı, anlık** hava durumu verisi için [Open-Meteo](https://open-meteo.com/) API'sine (ücretsiz, API anahtarı gerektirmeyen bir hava durumu servisi) bağlanabilmektedir. Bu, NTP entegrasyonuna benzer şekilde, dış bir "serverless" servise HTTPS üzerinden bağlanma pratiğidir.
+
+### Çalışma Prensibi — İki Aşamalı Sorgu
+
+1. **Geocoding (şehir adı → koordinat):** `geocoding-api.open-meteo.com` adresine, şehir ismiyle bir istek atılır, cevaptan enlem/boylam alınır.
+2. **Forecast (koordinat → anlık sıcaklık):** `api.open-meteo.com` adresine, elde edilen koordinatlarla bir istek atılır, cevaptaki `current_weather.temperature` alanı okunur.
+
+İkisi de **WinHTTP** (Windows'un yerleşik HTTPS istemci kütüphanesi) üzerinden, TLS şifrelemesi dahil tüm detaylar kütüphane tarafından yönetilerek gerçekleştirilir. ESP32'ye taşınırken, karşılığı `esp_http_client` kütüphanesi olacaktır.
+
+### Şehir Seçimi — İki Bağımsız Mekanizma
+
+**1) Başlangıç config dosyası (`sehir_config.json`):**
+```json
+{
+    "sehir": "Ankara"
+}
+```
+Program başlarken bu dosyadan okunan şehir, **varsayılan** olarak kullanılır; periyodik yayın (60 saniyede bir, `ANLIK_HAVA_SORGU_ARALIGI_MS`) bu şehir için çalışır.
+
+**2) Runtime komutu (`cmd/sehir_sorgu`):** Herhangi bir subscriber, çalışma zamanında şu formatta bir mesaj göndererek şehri **anında** değiştirebilir/sorgulayabilir:
+```json
+{"topic":"cmd/sehir_sorgu","payload":"Cankaya"}
+```
+Bu, normal veri yayınlama yasağının (subscriber'lar `sensor/sicaklik` gibi topic'lere veri gönderemez) **bilinçli bir istisnasıdır** — sistemin authorization mantığı, "veri" ile "kontrol komutu" mesajlarını ayırt edecek şekilde genişletilmiştir. Broker, komutu aldığında hemen yeni bir sorgu yapar ve sonucu **tüm subscriber'lara** `sensor/anlik_sicaklik` topic'iyle yayınlar:
+```json
+{"topic":"sensor/anlik_sicaklik","payload":"23.9","sehir":"Cankaya","zaman":1788873234}
+```
+
+### Eşzamanlılık Koruması
+
+Periyodik yayın görevi (`vAnlikHavaTask`) ile runtime komutları (`vClientHandlerTask` üzerinden), **aynı anda, farklı görevlerden** dış API'yi çağırabilmektedir. Test sırasında, bu ortamda (FreeRTOS Windows Simulator) eşzamanlı WinHTTP çağrılarının güvenilir sonuç vermediği tespit edilmiş; çözüm olarak dış API erişimi bir mutex (`xHttpMutex`) ile korunarak, aynı anda yalnızca bir görevin HTTPS isteği atabilmesi garanti altına alınmıştır.
+
+### Test Aracı
+
+`test_subscriber.py`, mentörün "kendi yazdığı bir subscriber broker'a bağlanıp şehir sorgulayabilsin" senaryosunu simüle eden, bağımsız bir Python betiğidir. Tek bir döngüde hem soket hem klavye girişini (non-blocking) işleyerek, terminal çıktısının karışmasını (çoklu thread kullanan ilk versiyonda yaşanan bir sorun) önler.
+
 ## Gerçek Veri Seti
 
 Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek, kaynağı belirtilmiş** bir hava durumu veri setinden (`ankara_sicaklik_verileri.csv`, **1022 kayıt, 68 şehir**) sırayla okuma yapar. Her yayınlanan mesaj, gerçek bir şehir, tarih, sıcaklık ve hava durumu açıklaması taşır — bu sayede sistem, Türkiye çapında dağıtık bir sensör ağını simüle eder.
@@ -176,6 +232,8 @@ Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek, kaynağı 
 - [x] Gerçek, kaynaklı bir veri setinden (1022 kayıt, 68 şehir) sensör verisi üretimi
 - [x] MQTT/TCP/JSON altyapısından bağımsız UDP komut kanalı (PING/HEAP/STATUS)
 - [x] Broker'ın idle-timeout ile kendini düzgün şekilde kapatabilmesi
+- [x] NTP ile gerçek zaman senkronizasyonu (DNS çözümleme, UDP NTP paket alışverişi, JSON mesajlarına Unix timestamp eklenmesi)
+- [x] Open-Meteo API entegrasyonu (WinHTTP/HTTPS, geocoding + anlık hava durumu, config dosyası + runtime komutuyla çift yönlü şehir seçimi)
 
 ## Bilinen Kısıtlamalar
 
@@ -186,7 +244,6 @@ Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak 
 ## Yol Haritası
 
 - [ ] ESP32'ye taşınabilirlik (network katmanının soyutlanması)
-- [ ] Gerçek zamanlı bir hava durumu API'sinden canlı veri çekme
 
 ## Proje Yapısı
 
@@ -196,7 +253,9 @@ Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak 
 ├── CMakeLists.txt                   # Derleme yapılandırması
 ├── FreeRTOSConfig.h                 # FreeRTOS kernel yapılandırma ayarları
 ├── monitor.py                       # Python/Tkinter kontrol paneli
-├── ankara_sicaklik_verileri.csv     # Gerçek sensör veri seti
+├── ankara_sicaklik_verileri.csv     # Gerçek sensör veri seti (68 şehir, 1022 kayıt)
+├── sehir_config.json                # Anlık hava durumu için varsayılan şehir
+├── test_subscriber.py               # Runtime şehir sorgu komutu test aracı
 ├── cJSON/
 │   ├── cJSON.c
 │   └── cJSON.h
