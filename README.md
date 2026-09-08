@@ -116,7 +116,7 @@ Broker ve subscriber, gelen JSON verisini `cJSON_Parse()` ile ayrıştırıp `to
 
 ## MQTT'den Bağımsız İletişim Kanalı
 
-Sistemin tek bir protokole bağımlı olmadığını göstermek amacıyla, **her rolde** çalışan ayrı bir görev (`vUdpCommandTask`), TCP/JSON/authentication altyapısından tamamen bağımsız olarak, **UDP** üzerinden **düz metin komutlar** kabul eder. Ana TCP portunun `+1000`'i üzerinde dinler (örn. broker `8080` çalışıyorsa, UDP kanalı `9080`'de).
+Sistemin tek bir protokole bağımlı olmadığını göstermek amacıyla, **her rolde** çalışan ayrı bir görev (`vUdpCommandTask`), TCP/JSON/authentication altyapısından tamamen bağımsız olarak, **UDP** üzerinden **düz metin komutlar** kabul eder. Her rol, kendi **benzersiz** UDP portunda dinler — ana TCP portunun `+1000`'i, artı role göre bir ofset (`rol_numarası × 10`) — böylece aynı makinede broker/publisher/subscriber aynı anda çalışırken portlar çakışmaz (örn. broker `8080` çalışıyorsa, broker'ın UDP kanalı `9080`'de, publisher'ınki `9090`'da olur).
 
 | Komut | Cevap | Açıklama |
 |---|---|---|

@@ -1,6 +1,6 @@
 #include "cJSON.h"
 #include <winsock2.h>
-#include <ws2tcpip.h>
+#include <ws2tcpip.h>  /* getaddrinfo() icin */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +13,32 @@
 #include <stdbool.h>
 #include "timers.h"
 
+#include <time.h>        /* time_t icin */
+
+
 #define MAX_SICAKLIK_KAYIT 1100   
+
+
+/* Standart 48 byte'lik NTP paket formati (RFC 5905). */
+typedef struct
+{
+    uint8_t  li_vn_mode;
+    uint8_t  stratum;
+    uint8_t  poll;
+    uint8_t  precision;
+    uint32_t rootDelay;
+    uint32_t rootDispersion;
+    uint32_t refId;
+    uint32_t refTm_s;
+    uint32_t refTm_f;
+    uint32_t origTm_s;
+    uint32_t origTm_f;
+    uint32_t rxTm_s;
+    uint32_t rxTm_f;
+    uint32_t txTm_s;   /* bizim ilgilendigimiz alan - sunucunun cevabi gonderdigi an */
+    uint32_t txTm_f;
+} NtpPaketi_t;
+
 
 typedef struct
 {
@@ -84,6 +109,11 @@ static QueueHandle_t xPublishQueue = NULL;
 #define STACK_SIZE_UDP_COMMAND     ( configMINIMAL_STACK_SIZE * 4 )
 #define IDLE_TIMEOUT_MS   30000   /* 30 saniye hic baglanti gelmezse kapan */
 
+#define NTP_SERVER              "pool.ntp.org"
+#define NTP_PORT                123
+#define NTP_SYNC_INTERVAL_MS    ( 5 * 60 * 1000 )   /* 5 dakikada bir yeniden senkronize et */
+#define NTP_UNIX_EPOCH_FARKI    2208988800UL         /* 1900-1970 arasi saniye farki */
+
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
  * ------------------------------------------------------------------- */
@@ -116,6 +146,13 @@ static bool bBilerekKapatiliyor = false;
 static int  xPortNumarasi = DEFAULT_PORT;
 static char cBrokerIP[ 64 ] = DEFAULT_BROKER_IP;
 
+/* NTP'den alinan zaman ile yerel tick sayaci arasindaki fark (saniye).
+ * Bu ofset, periyodik olarak NTP ile yeniden senkronize edilir; aradaki
+ * surede ise projenin kendi "real-time clock"u gibi calisir - her an
+ * icin agdan tekrar sormaya gerek kalmadan hesaplanabilir. */
+static volatile time_t xUnixZamanOfseti = 0;
+static volatile bool bNtpSenkronize = false;
+
 
 static void vHealthTask( void *pvParameters );
 static void vInternalCommTask( void *pvParameters );
@@ -132,6 +169,10 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
 static void vUdpCommandTask( void *pvParameters );
 static void vIdleTimeoutCallback( TimerHandle_t xTimer );
+
+static bool prvNtpSorgula( time_t *pxSonucUnixZaman );
+static void vNtpSyncTask( void *pvParameters );
+static time_t prvSuankiUnixZaman( void );
 
 
 int main( int argc, char *argv[] )
@@ -279,6 +320,138 @@ else
     return EXIT_FAILURE;
 }
 }
+
+/* =======================================================================
+ * prvNtpSorgula()
+ *
+ * TEK BIR NTP sorgusu yapar: DNS ile sunucuyu bulur, UDP ile 48 byte'lik
+ * istek paketi gonderir, cevabi okuyup Unix zamanina cevirir.
+ * ===================================================================== */
+static bool prvNtpSorgula( time_t *pxSonucUnixZaman )
+{
+    struct addrinfo hints;
+    struct addrinfo *sonuc = NULL;
+
+    memset( &hints, 0, sizeof( hints ) );
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    char portStr[ 6 ];
+    snprintf( portStr, sizeof( portStr ), "%d", NTP_PORT );
+
+    /* --- DNS COZUMLEME --- */
+    int dnsSonuc = getaddrinfo( NTP_SERVER, portStr, &hints, &sonuc );
+
+    if( dnsSonuc != 0 || sonuc == NULL )
+    {
+        printf( "[NTP] HATA: DNS cozumleme basarisiz (%s), kod: %d\n",
+                NTP_SERVER, dnsSonuc );
+        return false;
+    }
+
+    printf( "[NTP] DNS cozumlendi: %s\n", NTP_SERVER );
+
+    SOCKET ntpSocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+
+    if( ntpSocket == INVALID_SOCKET )
+    {
+        printf( "[NTP] HATA: soket olusturulamadi.\n" );
+        freeaddrinfo( sonuc );
+        return false;
+    }
+
+    /* recv() sonsuza kadar beklemesin diye 3 saniyelik zaman asimi. */
+    DWORD timeout = 3000;
+    setsockopt( ntpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char *) &timeout, sizeof( timeout ) );
+
+    NtpPaketi_t paket;
+    memset( &paket, 0, sizeof( paket ) );
+    paket.li_vn_mode = 0x1B;   /* LI=0, VN=3 (NTPv3), Mode=3 (client istegi) */
+
+    int gonderilen = sendto( ntpSocket, (char *) &paket, sizeof( paket ), 0,
+                              sonuc->ai_addr, (int) sonuc->ai_addrlen );
+    freeaddrinfo( sonuc );
+
+    if( gonderilen == SOCKET_ERROR )
+    {
+        printf( "[NTP] HATA: sendto basarisiz, kod: %d\n", WSAGetLastError() );
+        closesocket( ntpSocket );
+        return false;
+    }
+
+    int alinan = recv( ntpSocket, (char *) &paket, sizeof( paket ), 0 );
+    closesocket( ntpSocket );
+
+    if( alinan != (int) sizeof( paket ) )
+    {
+        printf( "[NTP] HATA: gecersiz cevap (beklenen %d byte, alinan %d byte).\n",
+                (int) sizeof( paket ), alinan );
+        return false;
+    }
+
+    /* txTm_s: sunucunun cevabi GONDERDIGI andaki, 1900'den beri gecen
+     * saniye. Network byte order'dan (buyuk-endian) makinemizin byte
+     * order'ina ceviriyoruz (ntohl), sonra 1970 referansina kaydiriyoruz. */
+    uint32_t txTm_s = ntohl( paket.txTm_s );
+    *pxSonucUnixZaman = (time_t) ( txTm_s - NTP_UNIX_EPOCH_FARKI );
+
+    return true;
+}
+
+/* =======================================================================
+ * vNtpSyncTask()
+ *
+ * Periyodik olarak (5 dakikada bir) NTP sunucusuyla senkronize olur.
+ * Basarili her senkronizasyonda, "NTP zamani - yerel tick zamani"
+ * farkini (offset) gunceller - boylece aradaki surede aga gitmeden,
+ * dogrudan tick sayacindan gercek zaman hesaplanabilir.
+ * ===================================================================== */
+static void vNtpSyncTask( void *pvParameters )
+{
+    ( void ) pvParameters;
+
+    for( ;; )
+    {
+        time_t sunucuZamani;
+
+        if( prvNtpSorgula( &sunucuZamani ) )
+        {
+            TickType_t suankiTick = xTaskGetTickCount();
+            time_t tickSaniye = (time_t) ( ( (uint64_t) suankiTick * portTICK_PERIOD_MS ) / 1000 );
+
+            xUnixZamanOfseti = sunucuZamani - tickSaniye;
+            bNtpSenkronize = true;
+
+            printf( "[NTP] Senkronize edildi. Sunucu zamani (Unix): %lld\n",
+                    (long long) sunucuZamani );
+        }
+        else
+        {
+            printf( "[NTP] Senkronizasyon basarisiz, %d saniye sonra tekrar denenecek.\n",
+                    NTP_SYNC_INTERVAL_MS / 1000 );
+        }
+
+        vTaskDelay( pdMS_TO_TICKS( NTP_SYNC_INTERVAL_MS ) );
+    }
+}
+
+/* =======================================================================
+ * prvSuankiUnixZaman()
+ *
+ * "Su an kac" sorusunun cevabi - aga hic gitmeden, kaydedilen offset ve
+ * o anki tick sayacindan hesaplar. NTP hic senkronize olmadiysa (henuz
+ * ilk sorgu yapilmadiysa), offset 0'dir, donen deger sadece "tick
+ * sayacinin saniyeye cevrilmis hali" olur (anlamli bir gercek zaman
+ * DEGILDIR, bilgi amaclidir).
+ * ===================================================================== */
+static time_t prvSuankiUnixZaman( void )
+{
+    TickType_t suankiTick = xTaskGetTickCount();
+    time_t tickSaniye = (time_t) ( ( (uint64_t) suankiTick * portTICK_PERIOD_MS ) / 1000 );
+
+    return xUnixZamanOfseti + tickSaniye;
+}
+
 
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
 {
@@ -432,6 +605,18 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
                                 NULL,
                                 PRIORITY_UDP_COMMAND,
                                 &xUdpCmdHandle );
+        configASSERT( xResult == pdPASS );
+    }
+    /* NTP senkronizasyon task'i - her rolde calisir, gercek zamani
+    * global bir sunucudan alip yerel olarak isletir. */
+    {
+        TaskHandle_t xNtpTaskHandle = NULL;
+        xResult = xTaskCreate( vNtpSyncTask,
+                                "NtpSync",
+                                STACK_SIZE_UDP_COMMAND,   /* benzer boyut yeterli */
+                                NULL,
+                                PRIORITY_UDP_COMMAND,      /* benzer oncelik yeterli */
+                                &xNtpTaskHandle );
         configASSERT( xResult == pdPASS );
     }
 
@@ -764,6 +949,7 @@ static void vNetworkTask( void *pvParameters )
                     cJSON_AddStringToObject( root, "sehir", gelenVeri.sehir );
                     cJSON_AddStringToObject( root, "tarih", gelenVeri.tarih );
                     cJSON_AddStringToObject( root, "durum", gelenVeri.durum );
+                    cJSON_AddNumberToObject( root, "zaman", (double) prvSuankiUnixZaman() );
 
                     char *jsonString = cJSON_PrintUnformatted( root );
 
