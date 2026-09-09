@@ -1,7 +1,7 @@
 #include "cJSON.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>  /* getaddrinfo() icin */
-
+#include <winhttp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +12,7 @@
 #include "semphr.h"
 #include <stdbool.h>
 #include "timers.h"
+
 
 #include <time.h>        /* time_t icin */
 
@@ -38,6 +39,16 @@ typedef struct
     uint32_t txTm_s;   /* bizim ilgilendigimiz alan - sunucunun cevabi gonderdigi an */
     uint32_t txTm_f;
 } NtpPaketi_t;
+
+typedef struct
+{
+    bool  basarili;
+    float sicaklik;
+    float enlem;
+    float boylam;
+} AnlikHavaSonucu_t;
+
+static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi );
 
 
 typedef struct
@@ -95,17 +106,18 @@ static QueueHandle_t xPublishQueue = NULL;
 #define PRIORITY_MQTT_PUBLISHER    ( tskIDLE_PRIORITY + 2 )
 #define PRIORITY_MQTT_SUBSCRIBER   ( tskIDLE_PRIORITY + 2 )
 #define PRIORITY_CLIENT_HANDLER    ( tskIDLE_PRIORITY + 3 )
+#define PRIORITY_UDP_COMMAND       ( tskIDLE_PRIORITY + 2 )
+#define PRIORITY_ANLIK_HAVA        ( tskIDLE_PRIORITY + 2 )
 
 #define STACK_SIZE_HEALTH          ( configMINIMAL_STACK_SIZE * 4 )
 #define STACK_SIZE_INTERNAL_COMM   ( configMINIMAL_STACK_SIZE * 4 )
 #define STACK_SIZE_NETWORK         ( configMINIMAL_STACK_SIZE * 6 )
 #define STACK_SIZE_MQTT            ( configMINIMAL_STACK_SIZE * 4 )
-#define STACK_SIZE_CLIENT_HANDLER  ( configMINIMAL_STACK_SIZE * 4 )
+#define STACK_SIZE_CLIENT_HANDLER  ( configMINIMAL_STACK_SIZE * 8 )   /* HTTPS istegi + 4KB yerel buffer icin buyutuldu */
 #define MAX_CLIENTS                 5
 #define SHARED_AUTH_TOKEN           "gizli_sifre123"
 #define DEFAULT_PORT         8080
 #define DEFAULT_BROKER_IP    "127.0.0.1"
-#define PRIORITY_UDP_COMMAND       ( tskIDLE_PRIORITY + 2 )
 #define STACK_SIZE_UDP_COMMAND     ( configMINIMAL_STACK_SIZE * 4 )
 #define IDLE_TIMEOUT_MS   30000   /* 30 saniye hic baglanti gelmezse kapan */
 
@@ -113,6 +125,10 @@ static QueueHandle_t xPublishQueue = NULL;
 #define NTP_PORT                123
 #define NTP_SYNC_INTERVAL_MS    ( 5 * 60 * 1000 )   /* 5 dakikada bir yeniden senkronize et */
 #define NTP_UNIX_EPOCH_FARKI    2208988800UL         /* 1900-1970 arasi saniye farki */
+
+#define STACK_SIZE_ANLIK_HAVA      ( configMINIMAL_STACK_SIZE * 8 )   /* WinHTTP icin biraz daha fazla stack */
+#define ANLIK_HAVA_SORGU_ARALIGI_MS   ( 60 * 1000 )   /* 60 saniyede bir sorgula */
+
 
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
@@ -152,6 +168,11 @@ static char cBrokerIP[ 64 ] = DEFAULT_BROKER_IP;
  * icin agdan tekrar sormaya gerek kalmadan hesaplanabilir. */
 static volatile time_t xUnixZamanOfseti = 0;
 static volatile bool bNtpSenkronize = false;
+/* Su anki secili sehir - hem config dosyasindan hem runtime komuttan
+ * (subscriber'dan gelen cmd/sehir_sorgu ile) degistirilebiliyor. Iki
+ * farkli task/context'ten erisildigi icin mutex ile koruyoruz. */
+static char cSuankiSehir[ 64 ] = "Ankara";
+static SemaphoreHandle_t xSehirMutex = NULL;
 
 
 static void vHealthTask( void *pvParameters );
@@ -173,6 +194,12 @@ static void vIdleTimeoutCallback( TimerHandle_t xTimer );
 static bool prvNtpSorgula( time_t *pxSonucUnixZaman );
 static void vNtpSyncTask( void *pvParameters );
 static time_t prvSuankiUnixZaman( void );
+static bool prvHttpsGet( const wchar_t *pcHost, const wchar_t *pcYol,
+                          char *pcCevapBuffer, size_t xBufferBoyutu );
+static void prvAsciiToWide( const char *pcKaynak, wchar_t *pcHedef, size_t xHedefBoyutu );
+static void prvSehirConfigYukle( const char *pcDosyaYolu );
+static void vAnlikHavaTask( void *pvParameters );
+static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
 
 
 int main( int argc, char *argv[] )
@@ -209,6 +236,7 @@ int main( int argc, char *argv[] )
     xMyRole = prvParseRoleFromArgs( argc, argv );
     prvParseNetworkArgsFromArgs( argc, argv );   /* <-- YENİ SATIR */
     prvSicaklikVerisiYukle( "ankara_sicaklik_verileri.csv" );
+    prvSehirConfigYukle( "sehir_config.json" );
 
     if( xMyRole == ROLE_UNDEFINED )
     {
@@ -233,7 +261,18 @@ int main( int argc, char *argv[] )
         printf( "HATA: Subscriber mutex'i olusturulamadi!\n" );
         return EXIT_FAILURE;
     }
-    
+    /* Suanki secili sehri koruyacak mutex - hem periyodik yayin task'i
+    * hem runtime komut (subscriber'dan gelen) hem de config yukleme
+    * ayni degiskene erisebiliyor. */
+    xSehirMutex = xSemaphoreCreateMutex();
+    if( xSehirMutex == NULL )
+    {
+        printf( "HATA: Sehir mutex'i olusturulamadi!\n" );
+        return EXIT_FAILURE;
+    }
+
+
+
     /* Network -> Internal Comm arasi veri tasimak icin queue.
     * 10 eleman kapasiteli - ayni anda en fazla 10 mesaj biriktirebilir. */
     xInternalCommQueue = xQueueCreate( 10, sizeof( SensorData_t ) );
@@ -296,7 +335,7 @@ int main( int argc, char *argv[] )
 
     /* 2) ADIM: Role uygun task'lari olustur. */
     prvCreateTasksForRole( xMyRole );
-    
+
     /* Scheduler baslamadan ONCE, bir kez BLOKLAYICI NTP sorgusu yaparak
     * ilk senkronizasyonu garanti altina aliyoruz. Boylece hicbir task
     * (ozellikle publisher) calismaya baslamadan once, xUnixZamanOfseti
@@ -319,7 +358,6 @@ int main( int argc, char *argv[] )
                     "vNtpSyncTask periyodik olarak tekrar deneyecek.\n" );
         }
     }
-
 
     /* 3) ADIM: Scheduler'i baslat - bu satirdan sonra kontrol
      *    bir daha asla buraya donmez. */
@@ -344,6 +382,389 @@ else
     return EXIT_FAILURE;
 }
 }
+
+/* Basit ASCII -> wide-char (UTF-16) donusumu. WinHTTP fonksiyonlari
+ * wide-char string bekliyor; bizim host/yol string'lerimiz her zaman
+ * saf ASCII oldugu icin (Turkce karakter icermiyor), tek tek
+ * genisletmek yeterli - tam bir Unicode donusum kutuphanesine
+ * (MultiByteToWideChar) ihtiyacimiz yok. */
+static void prvAsciiToWide( const char *pcKaynak, wchar_t *pcHedef, size_t xHedefBoyutu )
+{
+    size_t i = 0;
+    for( ; i < xHedefBoyutu - 1 && pcKaynak[ i ] != '\0'; i++ )
+    {
+        pcHedef[ i ] = (wchar_t) pcKaynak[ i ];
+    }
+    pcHedef[ i ] = L'\0';
+}
+/* =======================================================================
+ * prvSehirAnlikSicaklikGetir()
+ *
+ * IKI ASAMALI sorgu:
+ * 1) Geocoding: sehir ADI -> enlem/boylam (Open-Meteo Geocoding API)
+ * 2) Forecast: enlem/boylam -> ANLIK sicaklik (Open-Meteo Forecast API)
+ *
+ * Ikisi de HTTPS uzerinden, cJSON ile ayristirilarak.
+ * ===================================================================== */
+static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi )
+{
+    AnlikHavaSonucu_t sonuc;
+    memset( &sonuc, 0, sizeof( sonuc ) );
+
+    char cevapBuffer[ 4096 ];
+    char yolBuffer[ 256 ];
+    wchar_t yolWide[ 256 ];
+
+    /* --- ASAMA 1: GEOCODING (sehir adi -> koordinat) --- */
+    snprintf( yolBuffer, sizeof( yolBuffer ),
+              "/v1/search?name=%s&count=1&language=tr&format=json",
+              pcSehirAdi );
+    prvAsciiToWide( yolBuffer, yolWide, sizeof( yolWide ) / sizeof( wchar_t ) );
+
+    if( !prvHttpsGet( L"geocoding-api.open-meteo.com", yolWide,
+                       cevapBuffer, sizeof( cevapBuffer ) ) )
+    {
+        printf( "[HavaAPI] HATA: Geocoding istegi basarisiz (%s).\n", pcSehirAdi );
+        return sonuc;
+    }
+
+    cJSON *geoJson = cJSON_Parse( cevapBuffer );
+
+    if( geoJson == NULL )
+    {
+        printf( "[HavaAPI] HATA: Geocoding cevabi gecersiz JSON.\n" );
+        return sonuc;
+    }
+
+    cJSON *sonuclar = cJSON_GetObjectItem( geoJson, "results" );
+
+    if( sonuclar == NULL || !cJSON_IsArray( sonuclar ) || cJSON_GetArraySize( sonuclar ) == 0 )
+    {
+        printf( "[HavaAPI] HATA: '%s' icin sonuc bulunamadi.\n", pcSehirAdi );
+        cJSON_Delete( geoJson );
+        return sonuc;
+    }
+
+    cJSON *ilkSonuc = cJSON_GetArrayItem( sonuclar, 0 );
+    cJSON *enlemItem = cJSON_GetObjectItem( ilkSonuc, "latitude" );
+    cJSON *boylamItem = cJSON_GetObjectItem( ilkSonuc, "longitude" );
+
+    if( enlemItem == NULL || boylamItem == NULL )
+    {
+        printf( "[HavaAPI] HATA: koordinat alanlari eksik.\n" );
+        cJSON_Delete( geoJson );
+        return sonuc;
+    }
+
+    sonuc.enlem = (float) enlemItem->valuedouble;
+    sonuc.boylam = (float) boylamItem->valuedouble;
+
+    cJSON_Delete( geoJson );
+
+    printf( "[HavaAPI] '%s' icin koordinat bulundu: (%.4f, %.4f)\n",
+            pcSehirAdi, sonuc.enlem, sonuc.boylam );
+
+    /* --- ASAMA 2: FORECAST (koordinat -> ANLIK sicaklik) --- */
+    snprintf( yolBuffer, sizeof( yolBuffer ),
+              "/v1/forecast?latitude=%.4f&longitude=%.4f&current_weather=true",
+              sonuc.enlem, sonuc.boylam );
+    prvAsciiToWide( yolBuffer, yolWide, sizeof( yolWide ) / sizeof( wchar_t ) );
+
+    if( !prvHttpsGet( L"api.open-meteo.com", yolWide,
+                       cevapBuffer, sizeof( cevapBuffer ) ) )
+    {
+        printf( "[HavaAPI] HATA: Forecast istegi basarisiz.\n" );
+        return sonuc;
+    }
+
+    cJSON *havaJson = cJSON_Parse( cevapBuffer );
+
+    if( havaJson == NULL )
+    {
+        printf( "[HavaAPI] HATA: Forecast cevabi gecersiz JSON.\n" );
+        return sonuc;
+    }
+
+    cJSON *anlikHava = cJSON_GetObjectItem( havaJson, "current_weather" );
+
+    if( anlikHava == NULL )
+    {
+        printf( "[HavaAPI] HATA: 'current_weather' alani bulunamadi.\n" );
+        cJSON_Delete( havaJson );
+        return sonuc;
+    }
+
+    cJSON *sicaklikItem = cJSON_GetObjectItem( anlikHava, "temperature" );
+
+    if( sicaklikItem == NULL )
+    {
+        printf( "[HavaAPI] HATA: 'temperature' alani bulunamadi.\n" );
+        cJSON_Delete( havaJson );
+        return sonuc;
+    }
+
+    sonuc.sicaklik = (float) sicaklikItem->valuedouble;
+    sonuc.basarili = true;
+
+    cJSON_Delete( havaJson );
+
+    printf( "[HavaAPI] '%s' anlik sicaklik: %.1f C\n", pcSehirAdi, sonuc.sicaklik );
+
+    return sonuc;
+}
+
+/* =======================================================================
+ * prvSehirConfigYukle()
+ *
+ * Baslangicta, config JSON dosyasindan varsayilan sehri okur. cJSON
+ * zaten projede kullanildigi icin ekstra bir parse mekanizmasina
+ * ihtiyac duymuyoruz - tutarlilik ve ileride kolay genisletilebilirlik
+ * (orn. sorgu araligi gibi ek ayarlar) icin JSON secildi.
+ * ===================================================================== */
+static void prvSehirConfigYukle( const char *pcDosyaYolu )
+{
+    FILE *fp = fopen( pcDosyaYolu, "r" );
+
+    if( fp == NULL )
+    {
+        printf( "[main] UYARI: '%s' bulunamadi, varsayilan sehir "
+                "('%s') kullanilacak.\n", pcDosyaYolu, cSuankiSehir );
+        return;
+    }
+
+    char icerik[ 512 ];
+    size_t okunanBayt = fread( icerik, 1, sizeof( icerik ) - 1, fp );
+    icerik[ okunanBayt ] = '\0';
+    fclose( fp );
+
+    cJSON *configJson = cJSON_Parse( icerik );
+
+    if( configJson == NULL )
+    {
+        printf( "[main] UYARI: '%s' gecersiz JSON, varsayilan sehir "
+                "kullanilacak.\n", pcDosyaYolu );
+        return;
+    }
+
+    cJSON *sehirItem = cJSON_GetObjectItem( configJson, "sehir" );
+
+    if( sehirItem != NULL && cJSON_IsString( sehirItem ) )
+    {
+        strncpy( cSuankiSehir, sehirItem->valuestring, sizeof( cSuankiSehir ) - 1 );
+        cSuankiSehir[ sizeof( cSuankiSehir ) - 1 ] = '\0';
+        printf( "[main] Config'den sehir yuklendi: %s\n", cSuankiSehir );
+    }
+    else
+    {
+        printf( "[main] UYARI: config'de 'sehir' alani bulunamadi/gecersiz.\n" );
+    }
+
+    cJSON_Delete( configJson );
+}
+/* =======================================================================
+ * vAnlikHavaTask()
+ *
+ * Periyodik olarak (60 saniyede bir), o anki secili sehrin ANLIK
+ * sicakligini Open-Meteo'dan cekip "sensor/anlik_sicaklik" topic'iyle
+ * TUM subscriber'lara yayinlar. Sadece BROKER rolunde calisir.
+ * ===================================================================== */
+static void vAnlikHavaTask( void *pvParameters )
+{
+    ( void ) pvParameters;
+
+    /* Ilk sorgu icin biraz bekle - NTP/DNS gibi diger baslangic
+     * islemlerine firsat taniyoruz. */
+    vTaskDelay( pdMS_TO_TICKS( 5000 ) );
+
+    for( ;; )
+    {
+        char sehirKopyasi[ 64 ];
+
+        if( xSemaphoreTake( xSehirMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
+        {
+            strncpy( sehirKopyasi, cSuankiSehir, sizeof( sehirKopyasi ) - 1 );
+            sehirKopyasi[ sizeof( sehirKopyasi ) - 1 ] = '\0';
+            xSemaphoreGive( xSehirMutex );
+        }
+        else
+        {
+            strncpy( sehirKopyasi, "Ankara", sizeof( sehirKopyasi ) - 1 );
+        }
+
+        AnlikHavaSonucu_t sonuc = prvSehirAnlikSicaklikGetir( sehirKopyasi );
+
+        if( sonuc.basarili )
+        {
+            cJSON *havaRoot = cJSON_CreateObject();
+            cJSON_AddStringToObject( havaRoot, "topic", "sensor/anlik_sicaklik" );
+
+            char sicaklikStr[ 16 ];
+            snprintf( sicaklikStr, sizeof( sicaklikStr ), "%.1f", sonuc.sicaklik );
+            cJSON_AddStringToObject( havaRoot, "payload", sicaklikStr );
+            cJSON_AddStringToObject( havaRoot, "sehir", sehirKopyasi );
+            cJSON_AddNumberToObject( havaRoot, "zaman", (double) prvSuankiUnixZaman() );
+
+            char *havaJsonStr = cJSON_PrintUnformatted( havaRoot );
+            char gonderilecekHava[ 300 ];
+            snprintf( gonderilecekHava, sizeof( gonderilecekHava ), "%s\n", havaJsonStr );
+
+            xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+            for( int i = 0; i < xSubscriberCount; i++ )
+            {
+                send( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ), 0 );
+            }
+            xSemaphoreGive( xSubscriberListMutex );
+
+            cJSON_free( havaJsonStr );
+            cJSON_Delete( havaRoot );
+
+            printf( "[AnlikHava] Periyodik yayin: %s = %.1f C\n", sehirKopyasi, sonuc.sicaklik );
+            prvAnlikHavaKaydet( sehirKopyasi, &sonuc, prvSuankiUnixZaman() );
+        }
+
+        vTaskDelay( pdMS_TO_TICKS( ANLIK_HAVA_SORGU_ARALIGI_MS ) );
+    }
+}
+
+/* =======================================================================
+ * prvAnlikHavaKaydet()
+ *
+ * Her basarili anlik hava sorgusunu, CSV formatinda bir dosyaya EKLER
+ * (append). Zamanla, program calistikca, sistemin KENDI gerceklestirdigi
+ * gercek API sorgularindan olusan, buyuyen bir veri gunlugu birikir -
+ * mentorumun bahsettigi "tablo" fikrinin, sistemin kendisi tarafindan
+ * otomatik olarak tutulan hali.
+ * ===================================================================== */
+static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman )
+{
+    /* Dosya daha once var miydi kontrol et - yoksa basligi (header) yaz. */
+    FILE *kontrolFp = fopen( "anlik_hava_log.csv", "r" );
+    bool dosyaVarMi = ( kontrolFp != NULL );
+    if( kontrolFp != NULL )
+    {
+        fclose( kontrolFp );
+    }
+
+    FILE *fp = fopen( "anlik_hava_log.csv", "a" );
+
+    if( fp == NULL )
+    {
+        printf( "[AnlikHavaLog] UYARI: log dosyasi acilamadi.\n" );
+        return;
+    }
+
+    if( !dosyaVarMi )
+    {
+        fprintf( fp, "zaman,sehir,enlem,boylam,sicaklik\n" );
+    }
+
+    fprintf( fp, "%lld,%s,%.4f,%.4f,%.1f\n",
+             (long long) zaman, pcSehirAdi, pxSonuc->enlem, pxSonuc->boylam, pxSonuc->sicaklik );
+
+    fclose( fp );
+
+    printf( "[AnlikHavaLog] Kaydedildi: %s (%.4f, %.4f) = %.1f C\n",
+            pcSehirAdi, pxSonuc->enlem, pxSonuc->boylam, pxSonuc->sicaklik );
+}
+
+
+/* =======================================================================
+ * prvHttpsGet()
+ *
+ * WinHTTP kullanarak bir HTTPS GET istegi atar, cevabin BODY kismini
+ * pcCevapBuffer'a yazar. TLS/sertifika dogrulama gibi tum sifreleme
+ * islerini WinHTTP bizim yerimize hallediyor - biz sadece "bu host'a,
+ * bu yola git, cevabi getir" diyoruz.
+ * ===================================================================== */
+static bool prvHttpsGet( const wchar_t *pcHost, const wchar_t *pcYol,
+                          char *pcCevapBuffer, size_t xBufferBoyutu )
+{
+    bool basarili = false;
+    HINTERNET hSession = NULL, hConnect = NULL, hRequest = NULL;
+
+    hSession = WinHttpOpen( L"FreeRTOS-NetworkSim/1.0",
+                             WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                             WINHTTP_NO_PROXY_NAME,
+                             WINHTTP_NO_PROXY_BYPASS, 0 );
+
+    if( hSession == NULL )
+    {
+        printf( "[HTTP] HATA: WinHttpOpen basarisiz, kod: %lu\n", GetLastError() );
+        return false;
+    }
+
+    hConnect = WinHttpConnect( hSession, pcHost, INTERNET_DEFAULT_HTTPS_PORT, 0 );
+
+    if( hConnect == NULL )
+    {
+        printf( "[HTTP] HATA: WinHttpConnect basarisiz, kod: %lu\n", GetLastError() );
+        WinHttpCloseHandle( hSession );
+        return false;
+    }
+
+    hRequest = WinHttpOpenRequest( hConnect, L"GET", pcYol,
+                                    NULL, WINHTTP_NO_REFERER,
+                                    WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                    WINHTTP_FLAG_SECURE );
+
+    if( hRequest == NULL )
+    {
+        printf( "[HTTP] HATA: WinHttpOpenRequest basarisiz, kod: %lu\n", GetLastError() );
+        WinHttpCloseHandle( hConnect );
+        WinHttpCloseHandle( hSession );
+        return false;
+    }
+
+    BOOL gonderildi = WinHttpSendRequest( hRequest,
+                                           WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0 );
+
+    if( gonderildi && WinHttpReceiveResponse( hRequest, NULL ) )
+    {
+        size_t toplamOkunan = 0;
+        DWORD mevcutVeri = 0;
+
+        do
+        {
+            mevcutVeri = 0;
+
+            if( !WinHttpQueryDataAvailable( hRequest, &mevcutVeri ) || mevcutVeri == 0 )
+            {
+                break;
+            }
+
+            if( toplamOkunan + mevcutVeri >= xBufferBoyutu )
+            {
+                mevcutVeri = (DWORD) ( xBufferBoyutu - toplamOkunan - 1 );
+            }
+
+            DWORD okunanBayt = 0;
+
+            if( !WinHttpReadData( hRequest, pcCevapBuffer + toplamOkunan, mevcutVeri, &okunanBayt ) )
+            {
+                break;
+            }
+
+            toplamOkunan += okunanBayt;
+
+        } while( mevcutVeri > 0 && toplamOkunan < xBufferBoyutu - 1 );
+
+        pcCevapBuffer[ toplamOkunan ] = '\0';
+        basarili = ( toplamOkunan > 0 );
+    }
+    else
+    {
+        printf( "[HTTP] HATA: istek/cevap basarisiz, kod: %lu\n", GetLastError() );
+    }
+
+    WinHttpCloseHandle( hRequest );
+    WinHttpCloseHandle( hConnect );
+    WinHttpCloseHandle( hSession );
+
+    return basarili;
+}
+
+
 
 /* =======================================================================
  * prvNtpSorgula()
@@ -649,7 +1070,16 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
     switch( xRole )
     {
         case ROLE_BROKER:
-        printf( "[main] Broker rolu - ek is mantigi task'i yok.\n" );
+        {
+            TaskHandle_t xAnlikHavaHandle = NULL;
+            xResult = xTaskCreate( vAnlikHavaTask,
+                                    "AnlikHava",
+                                    STACK_SIZE_ANLIK_HAVA,
+                                    NULL,
+                                    PRIORITY_ANLIK_HAVA,
+                                    &xAnlikHavaHandle );
+            configASSERT( xResult == pdPASS );
+        }
         break;
 
         case ROLE_PUBLISHER:
@@ -1273,7 +1703,63 @@ static void vClientHandlerTask( void *pvParameters )
                             bGecerliMesaj = false;
                         }
 
-                        if( bIsSubscriber )
+                        if( bIsSubscriber && topicItem != NULL && cJSON_IsString( topicItem ) &&
+                            strcmp( topicItem->valuestring, "cmd/sehir_sorgu" ) == 0 &&
+                            payloadItem != NULL && cJSON_IsString( payloadItem ) )
+                        {
+                            /* OZEL ISTISNA: subscriber'dan gelen bir "sehir sorgu" KOMUTU -
+                            * normal veri yayinlama yasaginin istisnasi. Bu sayede
+                            * subscriber'lar runtime'da sehir talep edebiliyor. */
+                            printf( "[ClientHandler] Sehir sorgu komutu alindi: %s\n",
+                                    payloadItem->valuestring );
+
+                            if( xSemaphoreTake( xSehirMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
+                            {
+                                strncpy( cSuankiSehir, payloadItem->valuestring, sizeof( cSuankiSehir ) - 1 );
+                                cSuankiSehir[ sizeof( cSuankiSehir ) - 1 ] = '\0';
+                                xSemaphoreGive( xSehirMutex );
+                            }
+
+                            /* Bu bloklayici bir HTTPS cagrisi - ama SADECE bu client'in kendi
+                            * task'ini bloklar, diger client'lari ETKILEMEZ (her client kendi
+                            * ClientHandlerTask'inda calisiyor). */
+                            AnlikHavaSonucu_t sonuc = prvSehirAnlikSicaklikGetir( cSuankiSehir );
+
+                            if( sonuc.basarili )
+                            {
+                                cJSON *havaRoot = cJSON_CreateObject();
+                                cJSON_AddStringToObject( havaRoot, "topic", "sensor/anlik_sicaklik" );
+
+                                char sicaklikStr[ 16 ];
+                                snprintf( sicaklikStr, sizeof( sicaklikStr ), "%.1f", sonuc.sicaklik );
+                                cJSON_AddStringToObject( havaRoot, "payload", sicaklikStr );
+                                cJSON_AddStringToObject( havaRoot, "sehir", cSuankiSehir );
+                                cJSON_AddNumberToObject( havaRoot, "zaman", (double) prvSuankiUnixZaman() );
+
+                                char *havaJsonStr = cJSON_PrintUnformatted( havaRoot );
+                                char gonderilecekHava[ 300 ];
+                                snprintf( gonderilecekHava, sizeof( gonderilecekHava ), "%s\n", havaJsonStr );
+
+                                xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+                                for( int i = 0; i < xSubscriberCount; i++ )
+                                {
+                                    send( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ), 0 );
+                                }
+                                xSemaphoreGive( xSubscriberListMutex );
+
+                                cJSON_free( havaJsonStr );
+                                cJSON_Delete( havaRoot );
+
+                                printf( "[ClientHandler] Anlik hava yayinlandi: %s = %.1f C\n",
+                                        cSuankiSehir, sonuc.sicaklik );
+                                prvAnlikHavaKaydet( cSuankiSehir, &sonuc, prvSuankiUnixZaman() );
+                            }
+                            else
+                            {
+                                printf( "[ClientHandler] HATA: '%s' icin anlik hava alinamadi.\n", cSuankiSehir );
+                            }
+                        }
+                        else if( bIsSubscriber )
                         {
                             printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
                                     "calisti, veri reddediliyor. Gelen: %s\n", mesajBuffer );
@@ -1342,6 +1828,30 @@ static void vClientHandlerTask( void *pvParameters )
         /* Son client de ayrildi - idle sayaci SIMDI, bu andan itibaren
         * baslasin. */
         xSonBaglantiZamani = xTaskGetTickCount();
+    }
+    /* YENI: Eger bu bir subscriber idiyse, subscriber listesinden de
+    * CIKAR - aksi halde liste sadece buyur, hicbir zaman kucalmaz, bu da
+    * MAX_CLIENTS sinirina cabuk ulasilmasina yol acar (ozellikle
+    * test_komut.py gibi kisa omurlu subscriber baglantilari icin). */
+    if( bIsSubscriber )
+    {
+        xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+        for( int i = 0; i < xSubscriberCount; i++ )
+        {
+            if( xSubscriberSockets[ i ] == clientSocket )
+            {
+                /* Bulunan elemani, listenin SONUNDAKI elemanla degistir -
+                * boylece array'de bosluk kalmiyor, sadece toplam sayi
+                * bir azaliyor. Sira onemli degil, sadece "kimin gecerli
+                * oldugu" onemli. */
+                xSubscriberSockets[ i ] = xSubscriberSockets[ xSubscriberCount - 1 ];
+                xSubscriberCount--;
+                printf( "[ClientHandler] Subscriber listeden cikarildi "
+                        "(kalan subscriber sayisi: %d).\n", xSubscriberCount );
+                break;
+            }
+        }
+        xSemaphoreGive( xSubscriberListMutex );
     }
 
 
