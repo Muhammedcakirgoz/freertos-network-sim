@@ -3,6 +3,10 @@ build/
 *.exe
 *.obj
 *.o
+# Broker/subscriber log dosyalari (test sirasinda olusturulan)
+*.log
+broker_log.txt
+subscriber_log.txt
 
 # CMake
 CMakeCache.txt
