@@ -194,6 +194,17 @@ Bu, normal veri yayınlama yasağının (subscriber'lar `sensor/sicaklik` gibi t
 
 Periyodik yayın görevi (`vAnlikHavaTask`) ile runtime komutları (`vClientHandlerTask` üzerinden), **aynı anda, farklı görevlerden** dış API'yi çağırabilmektedir. Test sırasında, bu ortamda (FreeRTOS Windows Simulator) eşzamanlı WinHTTP çağrılarının güvenilir sonuç vermediği tespit edilmiş; çözüm olarak dış API erişimi bir mutex (`xHttpMutex`) ile korunarak, aynı anda yalnızca bir görevin HTTPS isteği atabilmesi garanti altına alınmıştır.
 
+### Kalıcı Kayıt — `anlik_hava_log.csv`
+
+Her başarılı anlık hava sorgusu (hem periyodik yayından hem runtime komutlarından gelenler), zaman damgası, şehir, koordinat ve sıcaklık bilgisiyle birlikte `anlik_hava_log.csv` dosyasına **otomatik olarak eklenir (append)**:
+```csv
+zaman,sehir,enlem,boylam,sicaklik
+1788936487,Ankara,39.9199,32.8543,18.2
+1788936539,paris,48.8534,2.3488,13.8
+1788936576,istanbul,41.0138,28.9497,23.3
+```
+Bu sayede sistem, çalıştığı süre boyunca yaptığı **gerçek API sorgularından oluşan, kendi kendine büyüyen bir veri günlüğü** biriktirir.
+
 ### Test Aracı
 
 `test_subscriber.py`, mentörün "kendi yazdığı bir subscriber broker'a bağlanıp şehir sorgulayabilsin" senaryosunu simüle eden, bağımsız bir Python betiğidir. Tek bir döngüde hem soket hem klavye girişini (non-blocking) işleyerek, terminal çıktısının karışmasını (çoklu thread kullanan ilk versiyonda yaşanan bir sorun) önler.
@@ -234,12 +245,15 @@ Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek, kaynağı 
 - [x] Broker'ın idle-timeout ile kendini düzgün şekilde kapatabilmesi
 - [x] NTP ile gerçek zaman senkronizasyonu (DNS çözümleme, UDP NTP paket alışverişi, JSON mesajlarına Unix timestamp eklenmesi)
 - [x] Open-Meteo API entegrasyonu (WinHTTP/HTTPS, geocoding + anlık hava durumu, config dosyası + runtime komutuyla çift yönlü şehir seçimi)
+- [x] Anlık hava sorgu sonuçlarının (koordinat + sıcaklık + zaman) `anlik_hava_log.csv`'ye kalıcı olarak kaydedilmesi
 
 ## Bilinen Kısıtlamalar
 
 FreeRTOS Windows Simulator portu, gerçekçi tek-çekirdekli zamanlama sağlamak amacıyla her görev iş parçacığını `SetThreadAffinityMask()` ile CPU'nun 0. çekirdeğine sabitlemekte ve işlem önceliğini `REALTIME_PRIORITY_CLASS` olarak ayarlamaktadır. Bu, **aynı fiziksel makinede birden fazla instance'ın eş zamanlı çalıştırılmasını** sınırlamaktadır (instance'lar aynı çekirdek için rekabet eder). Bu davranış, gerçek donanımda (her cihazın kendi bağımsız işlemcisine sahip olduğu bir senaryoda, örn. ESP32) yaşanmayacaktır; çoklu instance testleri farklı fiziksel makinelerde/VM'lerde sorunsuz çalışır.
 
 Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak çalıştırması nedeniyle, `vTaskEndScheduler()` çağrısı sistemi tam olarak durduramamaktadır (Timer Service task'ı silinse de, diğer görevler kendi Windows thread'lerinde çalışmaya devam edebilir). Bu nedenle idle-timeout özelliği, `exit()` ile doğrudan process sonlandırma kullanmaktadır.
+
+Bu ortamda, **birden fazla görevin aynı anda WinHTTP çağrısı yapması güvenilir sonuç vermemektedir** (test sırasında zaman aşımı hataları gözlemlenmiştir). Bu, projenin bir hatası olmaktan çok, bu simülasyon portunun HTTPS istemci kütüphanesiyle etkileşimindeki bir kısıtlama olarak değerlendirilmektedir; çözüm olarak dış API erişimi bir mutex ile serileştirilmiştir (bkz. "Open-Meteo API Entegrasyonu" bölümü).
 
 ## Yol Haritası
 
@@ -255,6 +269,7 @@ Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak 
 ├── monitor.py                       # Python/Tkinter kontrol paneli
 ├── ankara_sicaklik_verileri.csv     # Gerçek sensör veri seti (68 şehir, 1022 kayıt)
 ├── sehir_config.json                # Anlık hava durumu için varsayılan şehir
+├── anlik_hava_log.csv                # Program çalışırken otomatik oluşan, gerçek API sorgu günlüğü
 ├── test_subscriber.py               # Runtime şehir sorgu komutu test aracı
 ├── cJSON/
 │   ├── cJSON.c
