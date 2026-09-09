@@ -20,6 +20,7 @@ set(FREERTOS_SOURCES
 # --- Demo (uygulama) dosyaları ---
 set(DEMO_SOURCES
     main.c
+    net_port_windows.c
     cJSON/cJSON.c
 )
 
@@ -37,4 +38,4 @@ target_include_directories(freertos_demo PRIVATE
 
 
 # Windows'a ozel: zamanlayici (timer) ve soket (network) kutuphaneleri gerekli
-target_link_libraries(freertos_demo winmm ws2_32)
+target_link_libraries(freertos_demo winmm ws2_32 winhttp)

@@ -1,6 +1,11 @@
 #include "cJSON.h"
-#include <winsock2.h>
-#include <ws2tcpip.h>  /* getaddrinfo() icin */
+#include "net_port.h"
+
+/* GECICI: HTTPS henuz port katmanina tasinmadi. winhttp.h, LPVOID/DWORD
+ * gibi temel tipleri kendisi tanimlamiyor, windows.h'nin onceden
+ * include edilmis olmasini bekliyor. Bu iki satir, HTTPS port
+ * katmanina tasindiginda TAMAMEN KALDIRILACAK. */
+#include <windows.h>
 #include <winhttp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,6 +205,7 @@ static void prvAsciiToWide( const char *pcKaynak, wchar_t *pcHedef, size_t xHede
 static void prvSehirConfigYukle( const char *pcDosyaYolu );
 static void vAnlikHavaTask( void *pvParameters );
 static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
+static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu );
 
 
 int main( int argc, char *argv[] )
@@ -214,20 +220,13 @@ int main( int argc, char *argv[] )
      * gelmesine sebep olur. */
     setvbuf( stdout, NULL, _IONBF, 0 );
     
-     /* 0) ADIM: Winsock kutuphanesini baslat.
-     * Bu, Windows'a ozel bir zorunluluk - Linux/STM32'de bu adim
-     * gerekmeyecek (o yuzden ileride bu kodu soyutlama katmanina
-     * tasiyacagiz). WSAStartup basarisiz olursa, hicbir soket
-     * fonksiyonu calismaz. */
-    WSADATA wsaData;
-    int wsaResult = WSAStartup( MAKEWORD( 2, 2 ), &wsaData );
-    if( wsaResult != 0 )
+    /* Ag katmanini baslat - platformdan bagimsiz. Windows'ta WSAStartup
+    * cagirir, ESP32'de muhtemelen hicbir sey yapmayacak, ama uygulama
+    * kodu bu farki GORMEZ. */
+    if( !Net_Baslat() )
     {
-        printf( "HATA: WSAStartup basarisiz oldu, kod: %d\n", wsaResult );
         return EXIT_FAILURE;
     }
-    printf( "[main] Winsock baslatildi (versiyon: %d.%d)\n",
-            LOBYTE( wsaData.wVersion ), HIBYTE( wsaData.wVersion ) );
 
     
     
@@ -372,13 +371,13 @@ int main( int argc, char *argv[] )
     {
         printf( "\n[main] Broker, idle-timeout nedeniyle kendini duzgun "
                 "sekilde kapatti.\n" );
-        WSACleanup();
+        Net_Temizle();
         return EXIT_SUCCESS;
     }
 else
 {
     printf( "HATA: Scheduler baslatilamadi (yetersiz heap olabilir)\n" );
-    WSACleanup();
+    Net_Temizle();
     return EXIT_FAILURE;
 }
 }
@@ -398,6 +397,45 @@ static void prvAsciiToWide( const char *pcKaynak, wchar_t *pcHedef, size_t xHede
     pcHedef[ i ] = L'\0';
 }
 /* =======================================================================
+ * prvUrlEncode()
+ *
+ * URL'ye konacak metindeki HARF/RAKAM DISI her byte'i (bosluk, Turkce
+ * ozel karakterler gibi) "%XX" (hex) formatina cevirir - HTTP/URL
+ * standardinin gerektirdigi gibi. Bu, hem dogru bir HTTP istegi
+ * olusturmamizi saglar, hem de UTF-8 cok baytli karakterlerin
+ * prvAsciiToWide tarafindan YANLIS parcalanmasini ONLER - cunku
+ * kodlama sonrasi metin, sadece ASCII (harf, rakam, %) icerir.
+ * ===================================================================== */
+static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu )
+{
+    static const char *hexRakamlar = "0123456789ABCDEF";
+    size_t j = 0;
+
+    for( size_t i = 0; pcKaynak[ i ] != '\0' && j < xHedefBoyutu - 4; i++ )
+    {
+        unsigned char c = (unsigned char) pcKaynak[ i ];
+
+        if( ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) ||
+            ( c >= '0' && c <= '9' ) || c == '-' || c == '_' || c == '.' || c == '~' )
+        {
+            /* Bu karakterler URL'de guvenli, kodlamaya gerek yok. */
+            pcHedef[ j++ ] = (char) c;
+        }
+        else
+        {
+            /* Diger her sey (bosluk, Turkce karakterlerin UTF-8
+             * byte'lari vb.) "%XX" formatina cevriliyor. */
+            pcHedef[ j++ ] = '%';
+            pcHedef[ j++ ] = hexRakamlar[ c >> 4 ];
+            pcHedef[ j++ ] = hexRakamlar[ c & 0x0F ];
+        }
+    }
+
+    pcHedef[ j ] = '\0';
+}
+
+
+/* =======================================================================
  * prvSehirAnlikSicaklikGetir()
  *
  * IKI ASAMALI sorgu:
@@ -416,9 +454,12 @@ static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi )
     wchar_t yolWide[ 256 ];
 
     /* --- ASAMA 1: GEOCODING (sehir adi -> koordinat) --- */
+    char sehirKodlanmis[ 128 ];
+    prvUrlEncode( pcSehirAdi, sehirKodlanmis, sizeof( sehirKodlanmis ) );
+
     snprintf( yolBuffer, sizeof( yolBuffer ),
-              "/v1/search?name=%s&count=1&language=tr&format=json",
-              pcSehirAdi );
+            "/v1/search?name=%s&count=1&language=tr&format=json",
+            sehirKodlanmis );
     prvAsciiToWide( yolBuffer, yolWide, sizeof( yolWide ) / sizeof( wchar_t ) );
 
     if( !prvHttpsGet( L"geocoding-api.open-meteo.com", yolWide,
@@ -774,58 +815,44 @@ static bool prvHttpsGet( const wchar_t *pcHost, const wchar_t *pcYol,
  * ===================================================================== */
 static bool prvNtpSorgula( time_t *pxSonucUnixZaman )
 {
-    struct addrinfo hints;
-    struct addrinfo *sonuc = NULL;
+    NetAdres_t xSunucuAdresi;
 
-    memset( &hints, 0, sizeof( hints ) );
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-
-    char portStr[ 6 ];
-    snprintf( portStr, sizeof( portStr ), "%d", NTP_PORT );
-
-    /* --- DNS COZUMLEME --- */
-    int dnsSonuc = getaddrinfo( NTP_SERVER, portStr, &hints, &sonuc );
-
-    if( dnsSonuc != 0 || sonuc == NULL )
+    /* --- DNS COZUMLEME (platformdan bagimsiz) --- */
+    if( !Net_AdresCozumle( NTP_SERVER, NTP_PORT, &xSunucuAdresi ) )
     {
-        printf( "[NTP] HATA: DNS cozumleme basarisiz (%s), kod: %d\n",
-                NTP_SERVER, dnsSonuc );
+        printf( "[NTP] HATA: DNS cozumleme basarisiz (%s).\n", NTP_SERVER );
         return false;
     }
 
     printf( "[NTP] DNS cozumlendi: %s\n", NTP_SERVER );
 
-    SOCKET ntpSocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+    NetSocket_t xNtpSoket = Net_UdpSocketOlustur();
 
-    if( ntpSocket == INVALID_SOCKET )
+    if( xNtpSoket == NET_INVALID_SOCKET )
     {
         printf( "[NTP] HATA: soket olusturulamadi.\n" );
-        freeaddrinfo( sonuc );
         return false;
     }
 
-    /* recv() sonsuza kadar beklemesin diye 3 saniyelik zaman asimi. */
-    DWORD timeout = 3000;
-    setsockopt( ntpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char *) &timeout, sizeof( timeout ) );
+    /* Sonsuza kadar beklemesin diye 3 saniyelik zaman asimi. */
+    Net_ZamanAsimiAyarla( xNtpSoket, 3000 );
 
     NtpPaketi_t paket;
     memset( &paket, 0, sizeof( paket ) );
     paket.li_vn_mode = 0x1B;   /* LI=0, VN=3 (NTPv3), Mode=3 (client istegi) */
 
-    int gonderilen = sendto( ntpSocket, (char *) &paket, sizeof( paket ), 0,
-                              sonuc->ai_addr, (int) sonuc->ai_addrlen );
-    freeaddrinfo( sonuc );
+    int gonderilen = Net_UdpGonder( xNtpSoket, (const char *) &paket,
+                                     sizeof( paket ), &xSunucuAdresi );
 
-    if( gonderilen == SOCKET_ERROR )
+    if( gonderilen < 0 )
     {
-        printf( "[NTP] HATA: sendto basarisiz, kod: %d\n", WSAGetLastError() );
-        closesocket( ntpSocket );
+        printf( "[NTP] HATA: veri gonderilemedi.\n" );
+        Net_Kapat( xNtpSoket );
         return false;
     }
 
-    int alinan = recv( ntpSocket, (char *) &paket, sizeof( paket ), 0 );
-    closesocket( ntpSocket );
+    int alinan = Net_Al( xNtpSoket, (char *) &paket, sizeof( paket ) );
+    Net_Kapat( xNtpSoket );
 
     if( alinan != (int) sizeof( paket ) )
     {
@@ -836,8 +863,17 @@ static bool prvNtpSorgula( time_t *pxSonucUnixZaman )
 
     /* txTm_s: sunucunun cevabi GONDERDIGI andaki, 1900'den beri gecen
      * saniye. Network byte order'dan (buyuk-endian) makinemizin byte
-     * order'ina ceviriyoruz (ntohl), sonra 1970 referansina kaydiriyoruz. */
-    uint32_t txTm_s = ntohl( paket.txTm_s );
+     * order'ina ceviriyoruz, sonra 1970 referansina kaydiriyoruz.
+     *
+     * NOT: ntohl() yerine ELLE bit kaydirma kullaniyoruz - boylece
+     * bu kod, Winsock'a (ya da baska bir platform kutuphanesine)
+     * BAGIMLI OLMADAN, her platformda AYNI sekilde calisiyor. */
+    uint8_t *pucByte = (uint8_t *) &paket.txTm_s;
+    uint32_t txTm_s = ( (uint32_t) pucByte[ 0 ] << 24 ) |
+                      ( (uint32_t) pucByte[ 1 ] << 16 ) |
+                      ( (uint32_t) pucByte[ 2 ] << 8  ) |
+                      ( (uint32_t) pucByte[ 3 ] );
+
     *pxSonucUnixZaman = (time_t) ( txTm_s - NTP_UNIX_EPOCH_FARKI );
 
     return true;
@@ -1337,35 +1373,16 @@ static void vNetworkTask( void *pvParameters )
     {
         printf( "[Network] CLIENT modu: broker'a baglanmaya hazirlaniliyor...\n" );
 
-        /* 1) Soket olustur - broker tarafiyla ayni mantik */
-        SOCKET clientSocket = socket( AF_INET, SOCK_STREAM, 0 );
-        if( clientSocket == INVALID_SOCKET )
+        /* Baglanana kadar tekrar dene - soket olusturma, adres cozumleme ve
+        * connect adimlarinin TAMAMI Net_Baglan() icinde, platformdan
+        * bagimsiz sekilde yapiliyor. */
+        NetSocket_t clientSocket = NET_INVALID_SOCKET;
+
+        while( clientSocket == NET_INVALID_SOCKET )
         {
-            printf( "[Network] HATA: socket() basarisiz, kod: %d\n", WSAGetLastError() );
-            vTaskDelete( NULL );
-        }
+            clientSocket = Net_Baglan( cBrokerIP, xPortNumarasi );
 
-        /* 2) Baglanilacak adresi belirt - broker'in adresi/portu */
-        struct sockaddr_in brokerAddr;
-        memset( &brokerAddr, 0, sizeof( brokerAddr ) );
-        brokerAddr.sin_family = AF_INET;
-        brokerAddr.sin_port   = htons( (uint16_t) xPortNumarasi );
-        /* "127.0.0.1" (localhost) string'ini binary IP adresine cevir */
-        inet_pton( AF_INET, cBrokerIP, &brokerAddr.sin_addr );
-
-        /* 3) BAGLANMAYI DENE - bu asamada BILEREK blocking birakiyoruz,
-         * cunku "baglanana kadar bekle" burada mantikli bir davranis.
-         * Broker henuz ayakta degilse, bu cagri BASARISIZ olur (bekleyip
-         * sonsuza kadar durmaz) - bu yuzden bir retry donguesu kuruyoruz. */
-        int connectResult = SOCKET_ERROR;
-
-        while( connectResult == SOCKET_ERROR )
-        {
-            connectResult = connect( clientSocket,
-                                      (struct sockaddr *) &brokerAddr,
-                                      sizeof( brokerAddr ) );
-
-            if( connectResult == SOCKET_ERROR )
+            if( clientSocket == NET_INVALID_SOCKET )
             {
                 printf( "[Network] Broker'a baglanilamadi, 2 saniye sonra tekrar denenecek...\n" );
                 vTaskDelay( pdMS_TO_TICKS( 2000 ) );
@@ -2044,7 +2061,7 @@ static void vIdleTimeoutCallback( TimerHandle_t xTimer )
          * bu portta GERCEK bir Windows thread'i oldugu icin). Bu
          * yuzden TUM PROCESS'i dogrudan sonlandiriyoruz - bu, gercek
          * bir cihazin kapanmasiyla islevsel olarak ayni sonucu verir. */
-        WSACleanup();
+        Net_Temizle();
         exit( EXIT_SUCCESS );
     }
 }
