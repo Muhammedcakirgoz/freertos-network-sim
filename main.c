@@ -145,7 +145,7 @@ static QueueHandle_t xPublishQueue = NULL;
  * ClientHandlerTask (her biri farkli bir client icin calisan) bu listeye
  * AYNI ANDA erisebilir - bu yuzden bir MUTEX ile korumak zorundayiz.
  * ------------------------------------------------------------------- */
-static SOCKET xSubscriberSockets[ MAX_CLIENTS ];
+static NetSocket_t xSubscriberSockets[ MAX_CLIENTS ];
 static int    xSubscriberCount = 0;
 static SemaphoreHandle_t xSubscriberListMutex = NULL;
 
@@ -652,7 +652,7 @@ static void vAnlikHavaTask( void *pvParameters )
             xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
             for( int i = 0; i < xSubscriberCount; i++ )
             {
-                send( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ), 0 );
+                Net_Gonder( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ));
             }
             xSemaphoreGive( xSubscriberListMutex );
 
@@ -1221,7 +1221,7 @@ static void vHealthTask( void *pvParameters )
         {
             if( xSemaphoreTake( xSubscriberListMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
             {
-                unsigned long long xOlcumZamani = (unsigned long long) GetTickCount64();
+                unsigned long long xOlcumZamani = (unsigned long long) Net_SistemZamaniMs();
                 cJSON *healthRoot = cJSON_CreateObject();
                 cJSON_AddStringToObject( healthRoot, "topic", "system/health" );
 
@@ -1253,7 +1253,7 @@ static void vHealthTask( void *pvParameters )
 
                 for( int i = 0; i < xSubscriberCount; i++ )
                 {
-                    send( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ), 0 );
+                    Net_Gonder( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ));
                 }
 
                 cJSON_free( healthJson );
@@ -1297,50 +1297,26 @@ static void vNetworkTask( void *pvParameters )
     {
         printf( "[Network] BROKER modu: baglanti dinlemeye hazirlaniliyor...\n" );
 
-        /* 1) Dinleme soketi olustur. */
-        SOCKET listenSocket = socket( AF_INET, SOCK_STREAM, 0 );
-        if( listenSocket == INVALID_SOCKET )
-        {
-            printf( "[Network] HATA: socket() basarisiz, kod: %d\n", WSAGetLastError() );
-            vTaskDelete( NULL );
-        }
+        /* Soket olusturma, bind, listen ve non-blocking ayari - TUMU
+        * Net_DinlemeBaslat() icinde, platformdan bagimsiz sekilde yapiliyor. */
+        NetSocket_t listenSocket = Net_DinlemeBaslat( xPortNumarasi );
 
-        /* 2) Adres/port bilgisini doldur ve bind et. */
-        struct sockaddr_in serverAddr;
-        memset( &serverAddr, 0, sizeof( serverAddr ) );
-        serverAddr.sin_family      = AF_INET;
-        serverAddr.sin_addr.s_addr = INADDR_ANY;
-        serverAddr.sin_port        = htons( (uint16_t) xPortNumarasi );
-
-        if( bind( listenSocket, (struct sockaddr *) &serverAddr, sizeof( serverAddr ) ) == SOCKET_ERROR )
+        if( listenSocket == NET_INVALID_SOCKET )
         {
-            printf( "[Network] HATA: bind() basarisiz, kod: %d\n", WSAGetLastError() );
-            closesocket( listenSocket );
-            vTaskDelete( NULL );
-        }
-
-        /* 3) Dinlemeye basla. */
-        if( listen( listenSocket, 5 ) == SOCKET_ERROR )
-        {
-            printf( "[Network] HATA: listen() basarisiz, kod: %d\n", WSAGetLastError() );
-            closesocket( listenSocket );
+            printf( "[Network] HATA: dinleme baslatilamadi.\n" );
             vTaskDelete( NULL );
         }
 
         printf( "[Network] Broker port %d'de dinlemede...\n", xPortNumarasi );
 
-        /* Soketi NON-BLOCKING moda al. */
-        u_long ulMode = 1;
-        ioctlsocket( listenSocket, FIONBIO, &ulMode );
-
-        SOCKET clientSocket = INVALID_SOCKET;
+        NetSocket_t clientSocket = NET_INVALID_SOCKET;
 
         /* BROKER'a ozel sonsuz dongu - accept() burada, if bloğunun İÇİNDE */
         for( ;; )
         {
-            clientSocket = accept( listenSocket, NULL, NULL );
+            clientSocket = Net_BaglantiKabulEt( listenSocket );;
 
-            if( clientSocket != INVALID_SOCKET )
+            if( clientSocket != NET_INVALID_SOCKET  )
             {       
                     xSonBaglantiZamani = xTaskGetTickCount();  /* idle-timeout sayacini sifirla */
                     printf( "[Network] Yeni bir client baglandi! Kendi task'i olusturuluyor...\n" );
@@ -1356,10 +1332,10 @@ static void vNetworkTask( void *pvParameters )
                 if( xResult != pdPASS )
                 {
                     printf( "[Network] HATA: Client task'i olusturulamadi, baglanti reddediliyor.\n" );
-                    closesocket( clientSocket );
+                    Net_Kapat( clientSocket );
                 }
 
-                clientSocket = INVALID_SOCKET;
+                clientSocket = NET_INVALID_SOCKET ;
 }
             else
             {
@@ -1405,7 +1381,7 @@ static void vNetworkTask( void *pvParameters )
             const char *rolString = ( xRole == ROLE_PUBLISHER ) ? "PUBLISHER" : "SUBSCRIBER";
             snprintf( kimlikMesaji, sizeof( kimlikMesaji ), "AUTH:%s|ROLE:%s\n", SHARED_AUTH_TOKEN, rolString );
 
-            send( clientSocket, kimlikMesaji, (int) strlen( kimlikMesaji ), 0 );
+            Net_Gonder( clientSocket, kimlikMesaji, (int) strlen( kimlikMesaji ));
             printf( "[Network] Kimlik bildirildi: %s\n", kimlikMesaji );
 
 
@@ -1435,7 +1411,7 @@ static void vNetworkTask( void *pvParameters )
                     char gonderilecekVeri[ 256 ];
                     snprintf( gonderilecekVeri, sizeof( gonderilecekVeri ), "%s\n", jsonString );
 
-                    send( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ), 0 );
+                    Net_Gonder( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ));
                     printf( "[Network] JSON mesaj gonderildi: %s\n", jsonString );
 
                     cJSON_free( jsonString );
@@ -1445,9 +1421,8 @@ static void vNetworkTask( void *pvParameters )
         }
         else
         {
-            /* SUBSCRIBER: gelen veriyi dinle */
-            u_long ulMode = 1;
-            ioctlsocket( clientSocket, FIONBIO, &ulMode );
+            
+            Net_NonBlockingYap( clientSocket );
 
             char recvBuffer[ 256 ];
             char mesajBuffer[ 1024 ] = { 0 };  /* framing icin biriktirme buffer'i */
@@ -1455,8 +1430,7 @@ static void vNetworkTask( void *pvParameters )
 
             for( ;; )
             {
-                int bytesReceived = recv( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1, 0 );
-
+                int bytesReceived = Net_Al( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1 );
                 if( bytesReceived > 0 )
                 {
                     recvBuffer[ bytesReceived ] = '\0';
@@ -1523,7 +1497,7 @@ static void vNetworkTask( void *pvParameters )
                                     if( tsItem != NULL && cJSON_IsNumber( tsItem ) )
                                     {
                                         unsigned long long uzakZaman = (unsigned long long) tsItem->valuedouble;
-                                        unsigned long long yerelZaman = (unsigned long long) GetTickCount64();
+                                        unsigned long long yerelZaman = (unsigned long long) Net_SistemZamaniMs();
                                         long long gecikmeMs = (long long) ( yerelZaman - uzakZaman );
 
                                         printf( "[HealthPeer] Uzak instance'in health verisi %lld ms'de ulasti.\n",
@@ -1559,30 +1533,26 @@ static void vNetworkTask( void *pvParameters )
                         mesajBuffer[ mesajBufferUzunluk ] = '\0';
                     }
                 }
-                else if( bytesReceived == 0 )
+                else if( bytesReceived == NET_SONUC_BAGLANTI_KAPANDI )
                 {
                     printf( "[Network] Broker baglantiyi kapatti.\n" );
                     break;
                 }
-                else
+                else if( bytesReceived == NET_SONUC_HATA )
                 {
-                    int hataKodu = WSAGetLastError();
-                    if( hataKodu != WSAEWOULDBLOCK )
-                    {
-                        printf( "[Network] HATA: recv() basarisiz, kod: %d\n", hataKodu );
-                        break;
+                    printf( "[Network] HATA: veri alinamadi.\n" );
+                    break;
+                }
+
+                                vTaskDelay( pdMS_TO_TICKS( 100 ) );
+                            }
+                        }
                     }
                 }
 
-                vTaskDelay( pdMS_TO_TICKS( 100 ) );
-            }
-        }
-    }
-}
-
 static void vClientHandlerTask( void *pvParameters )
 {
-    SOCKET clientSocket = (SOCKET)(uintptr_t) pvParameters;
+    NetSocket_t clientSocket = (NetSocket_t)(uintptr_t) pvParameters;
     bool bIsSubscriber = false;
     bool bIsAuthenticated = false;
 
@@ -1590,8 +1560,8 @@ static void vClientHandlerTask( void *pvParameters )
             (int) clientSocket );
             xAktifClientSayisi++;
 
-    u_long ulMode = 1;
-    ioctlsocket( clientSocket, FIONBIO, &ulMode );
+    
+    Net_NonBlockingYap( clientSocket );
 
     char recvBuffer[ 256 ];
     char mesajBuffer[ 1024 ] = { 0 };
@@ -1603,8 +1573,7 @@ static void vClientHandlerTask( void *pvParameters )
 
     for( ;; )
     {
-        int bytesReceived = recv( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1, 0 );
-
+        int bytesReceived = Net_Al( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1 );
         if( bytesReceived > 0 )
         {
             recvBuffer[ bytesReceived ] = '\0';
@@ -1652,7 +1621,7 @@ static void vClientHandlerTask( void *pvParameters )
                     if( !bAuthBasarili )
                     {
                         printf( "[ClientHandler] YETKISIZ BAGLANTI! Token dogrulanamadi, baglanti reddediliyor.\n" );
-                        closesocket( clientSocket );
+                        Net_Kapat( clientSocket );
                         vTaskDelete( NULL );
                     }
 
@@ -1679,7 +1648,7 @@ static void vClientHandlerTask( void *pvParameters )
                     else
                     {
                         printf( "[ClientHandler] UYARI: Bilinmeyen rol, baglanti kapatiliyor.\n" );
-                        closesocket( clientSocket );
+                        Net_Kapat( clientSocket );
                         vTaskDelete( NULL );
                     }
                 }
@@ -1760,7 +1729,7 @@ static void vClientHandlerTask( void *pvParameters )
                                 xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
                                 for( int i = 0; i < xSubscriberCount; i++ )
                                 {
-                                    send( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ), 0 );
+                                    Net_Gonder( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ));
                                 }
                                 xSemaphoreGive( xSubscriberListMutex );
 
@@ -1791,7 +1760,7 @@ static void vClientHandlerTask( void *pvParameters )
                             {
                                 char gonderilecekMesaj[ 300 ];
                                 snprintf( gonderilecekMesaj, sizeof( gonderilecekMesaj ), "%s\n", mesajBuffer );
-                                send( xSubscriberSockets[ i ], gonderilecekMesaj, (int) strlen( gonderilecekMesaj ), 0 );
+                                Net_Gonder( xSubscriberSockets[ i ], gonderilecekMesaj, (int) strlen( gonderilecekMesaj ));
                             }
                             xSemaphoreGive( xSubscriberListMutex );
 
@@ -1814,21 +1783,17 @@ static void vClientHandlerTask( void *pvParameters )
                 mesajBuffer[ mesajBufferUzunluk ] = '\0';
             }
         }
-        else if( bytesReceived == 0 )
+        else if( bytesReceived == NET_SONUC_BAGLANTI_KAPANDI )
         {
             printf( "[ClientHandler] Client baglantiyi kapatti.\n" );
             break;
         }
-        else
+        else if( bytesReceived == NET_SONUC_HATA )
         {
-            int hataKodu = WSAGetLastError();
-            if( hataKodu != WSAEWOULDBLOCK )
-            {
-                printf( "[ClientHandler] HATA: recv() basarisiz, kod: %d - "
-                        "baglanti sonlandiriliyor.\n", hataKodu );
-                break;
-            }
+            printf( "[ClientHandler] HATA: veri alinamadi - baglanti sonlandiriliyor.\n" );
+            break;
         }
+        /* NET_SONUC_VERI_YOK durumunda hicbir sey yapmiyoruz - normal, devam. */
 
         if( !bIsAuthenticated &&
             ( xTaskGetTickCount() - xBaglantiBaslangic ) > pdMS_TO_TICKS( 5000 ) )
@@ -1872,7 +1837,8 @@ static void vClientHandlerTask( void *pvParameters )
     }
 
 
-    closesocket( clientSocket );
+
+    Net_Kapat( clientSocket );
     printf( "[ClientHandler] Task sonlandiriliyor.\n" );
     vTaskDelete( NULL );
 }
@@ -1894,45 +1860,32 @@ static void vUdpCommandTask( void *pvParameters )
 {
     ( void ) pvParameters;
 
-    SOCKET udpSocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
-
-    if( udpSocket == INVALID_SOCKET )
-    {
-        printf( "[UdpCmd] HATA: UDP soket olusturulamadi, kod: %d\n", WSAGetLastError() );
-        vTaskDelete( NULL );
-    }
-
-    struct sockaddr_in udpAddr;
-    memset( &udpAddr, 0, sizeof( udpAddr ) );
-    udpAddr.sin_family      = AF_INET;
-    udpAddr.sin_addr.s_addr = INADDR_ANY;
     /* Her ROL, kendi BENZERSIZ UDP portunu alsin - boylece ayni makinede
-    * broker/publisher/subscriber ayni anda calisirken portlari
-    * CAKISMASIN. Rol numarasina gore ek bir ofset ekliyoruz. */
-    udpAddr.sin_port = htons( (uint16_t) ( xPortNumarasi + 1000 + ( (int) xMyRole * 10 ) ) );
+     * broker/publisher/subscriber ayni anda calisirken portlari
+     * CAKISMASIN. Rol numarasina gore ek bir ofset ekliyoruz. */
+    int xUdpPort = xPortNumarasi + 1000 + ( (int) xMyRole * 10 );
 
-    if( bind( udpSocket, (struct sockaddr *) &udpAddr, sizeof( udpAddr ) ) == SOCKET_ERROR )
+    /* Soket olusturma, bind ve non-blocking ayari - TUMU
+     * Net_UdpDinlemeBaslat() icinde, platformdan bagimsiz sekilde
+     * yapiliyor. */
+    NetSocket_t udpSocket = Net_UdpDinlemeBaslat( xUdpPort );
+
+    if( udpSocket == NET_INVALID_SOCKET )
     {
-        printf( "[UdpCmd] HATA: UDP bind basarisiz, kod: %d\n", WSAGetLastError() );
-        closesocket( udpSocket );
+        printf( "[UdpCmd] HATA: UDP dinleme baslatilamadi.\n" );
         vTaskDelete( NULL );
     }
-
-    u_long ulMode = 1;
-    ioctlsocket( udpSocket, FIONBIO, &ulMode );
 
     printf( "[UdpCmd] MQTT'den BAGIMSIZ komut kanali - UDP port %d'de dinlemede...\n",
-        xPortNumarasi + 1000 + ( (int) xMyRole * 10 ) );
+            xUdpPort );
 
     char recvBuf[ 64 ];
 
     for( ;; )
     {
-        struct sockaddr_in gonderenAdres;
-        int adresBoyu = sizeof( gonderenAdres );
+        NetAdres_t xGonderenAdres;
 
-        int alinanBayt = recvfrom( udpSocket, recvBuf, sizeof( recvBuf ) - 1, 0,
-                                    (struct sockaddr *) &gonderenAdres, &adresBoyu );
+        int alinanBayt = Net_UdpAl( udpSocket, recvBuf, sizeof( recvBuf ) - 1, &xGonderenAdres );
 
         if( alinanBayt > 0 )
         {
@@ -1961,8 +1914,7 @@ static void vUdpCommandTask( void *pvParameters )
                 snprintf( cevap, sizeof( cevap ), "BILINMEYEN_KOMUT" );
             }
 
-            sendto( udpSocket, cevap, (int) strlen( cevap ), 0,
-                    (struct sockaddr *) &gonderenAdres, adresBoyu );
+            Net_UdpGonder( udpSocket, cevap, (int) strlen( cevap ), &xGonderenAdres );
 
             printf( "[UdpCmd] Komut alindi: '%s' -> Cevap: '%s'\n", recvBuf, cevap );
         }
@@ -2018,7 +1970,7 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer )
 
     for( int i = 0; i < xSubscriberCount; i++ )
     {
-        send( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ), 0 );
+        Net_Gonder( xSubscriberSockets[ i ], gonderilecek, (int) strlen( gonderilecek ));
     }
 
     cJSON_free( statusJson );
