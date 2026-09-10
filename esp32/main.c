@@ -20,7 +20,7 @@
 #include <time.h>        /* time_t icin */
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
-
+#include "esp_spiffs.h"
 
 #define MAX_SICAKLIK_KAYIT 1100   
 
@@ -172,6 +172,8 @@ static char cBrokerIP[ 64 ] = DEFAULT_BROKER_IP;
  * farkli task/context'ten erisildigi icin mutex ile koruyoruz. */
 static char cSuankiSehir[ 64 ] = "Ankara";
 static SemaphoreHandle_t xSehirMutex = NULL;
+static SicaklikKaydi_t xSicaklikVerileri[ MAX_SICAKLIK_KAYIT ];
+static int xSicaklikKayitSayisi = 0;
 
 
 static void vHealthTask( void *pvParameters );
@@ -194,6 +196,8 @@ static void vAnlikHavaTask( void *pvParameters );
 static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
 static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu );
 static void prvKonsolBaslat(void);
+static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
+static void prvSehirConfigYukle( const char *pcDosyaYolu );
 
 
 /* =======================================================================
@@ -298,6 +302,27 @@ static void vSehirSorguTask(void *pvParameters)
 void app_main(void)
 {
     prvKonsolBaslat();   /* EN BASTA - digerlerinden once */
+
+    /* SPIFFS'i baglama - ESP32'nin kendi flash'inda bir dosya sistemi
+    * olusturuyoruz, boylece CSV/config dosyalarini gercekten okuyabiliyoruz
+    * (Windows'taki gibi diskten degil, cihazin kendi flash'indan). */
+    esp_vfs_spiffs_conf_t spiffsConf = {
+        .base_path = "/spiffs",
+        .partition_label = "storage",
+        .max_files = 5,
+        .format_if_mount_failed = true
+    };
+
+    esp_err_t spiffsSonuc = esp_vfs_spiffs_register(&spiffsConf);
+
+    if (spiffsSonuc != ESP_OK) {
+        printf("[main] UYARI: SPIFFS baglanamadi (hata: %s)\n", esp_err_to_name(spiffsSonuc));
+    } else {
+        printf("[main] SPIFFS basariyla baglandi.\n");
+    }
+
+    prvSicaklikVerisiYukle( "/spiffs/ankara_sicaklik_verileri.csv" );
+    prvSehirConfigYukle( "/spiffs/sehir_config.json" );
 
     setvbuf(stdout, NULL, _IONBF, 0);
     xMyRole = ESP32_ROL;
@@ -690,6 +715,79 @@ static bool prvNtpSorgula( time_t *pxSonucUnixZaman )
     *pxSonucUnixZaman = (time_t) ( txTm_s - NTP_UNIX_EPOCH_FARKI );
 
     return true;
+}
+
+static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
+{
+    FILE *fp = fopen( pcDosyaYolu, "r" );
+
+    if( fp == NULL )
+    {
+        printf( "[main] UYARI: '%s' bulunamadi, sahte (rastgele) veri "
+                "kullanilacak.\n", pcDosyaYolu );
+        return;
+    }
+
+    char satir[ 128 ];
+    fgets( satir, sizeof( satir ), fp );  /* baslik satirini atla */
+
+    while( fgets( satir, sizeof( satir ), fp ) != NULL &&
+           xSicaklikKayitSayisi < MAX_SICAKLIK_KAYIT )
+    {
+        if( sscanf( satir, "%23[^,],%15[^,],%f,%39[^\r\n]",
+            xSicaklikVerileri[ xSicaklikKayitSayisi ].sehir,
+            xSicaklikVerileri[ xSicaklikKayitSayisi ].tarih,
+            &xSicaklikVerileri[ xSicaklikKayitSayisi ].sicaklik,
+            xSicaklikVerileri[ xSicaklikKayitSayisi ].durum ) == 4 )
+        {
+            xSicaklikKayitSayisi++;
+        }
+    }
+
+    fclose( fp );
+    printf( "[main] Gercek sicaklik veri seti yuklendi: %d kayit (%s).\n",
+            xSicaklikKayitSayisi, pcDosyaYolu );
+}
+
+static void prvSehirConfigYukle( const char *pcDosyaYolu )
+{
+    FILE *fp = fopen( pcDosyaYolu, "r" );
+
+    if( fp == NULL )
+    {
+        printf( "[main] UYARI: '%s' bulunamadi, varsayilan sehir "
+                "('%s') kullanilacak.\n", pcDosyaYolu, cSuankiSehir );
+        return;
+    }
+
+    char icerik[ 512 ];
+    size_t okunanBayt = fread( icerik, 1, sizeof( icerik ) - 1, fp );
+    icerik[ okunanBayt ] = '\0';
+    fclose( fp );
+
+    cJSON *configJson = cJSON_Parse( icerik );
+
+    if( configJson == NULL )
+    {
+        printf( "[main] UYARI: '%s' gecersiz JSON, varsayilan sehir "
+                "kullanilacak.\n", pcDosyaYolu );
+        return;
+    }
+
+    cJSON *sehirItem = cJSON_GetObjectItem( configJson, "sehir" );
+
+    if( sehirItem != NULL && cJSON_IsString( sehirItem ) )
+    {
+        strncpy( cSuankiSehir, sehirItem->valuestring, sizeof( cSuankiSehir ) - 1 );
+        cSuankiSehir[ sizeof( cSuankiSehir ) - 1 ] = '\0';
+        printf( "[main] Config'den sehir yuklendi: %s\n", cSuankiSehir );
+    }
+    else
+    {
+        printf( "[main] UYARI: config'de 'sehir' alani bulunamadi/gecersiz.\n" );
+    }
+
+    cJSON_Delete( configJson );
 }
 
 /* =======================================================================
