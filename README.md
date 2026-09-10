@@ -245,11 +245,29 @@ Her platform, aynı arayüzün **kendi implementasyonunu** sağlar; `main.c` **t
 - WiFi üzerinden ağa bağlanma (`wifi_connect.c/h`)
 - Laptop'ta çalışan broker'a TCP üzerinden başarılı bağlantı, authentication ve JSON mesajlaşma
 - NTP senkronizasyonu (DNS + UDP), gerçek Unix zaman damgalarının JSON mesajlarına eklenmesi
-- Aynı task mimarisi (Health, Network, MqttPub, NtpSync, UdpCmd, InternalComm), gerçek FreeRTOS/ESP-IDF ortamında, heap sızıntısı olmadan çalışmaktadır
+- **Open-Meteo/HTTPS** (TLS el sıkışması, sertifika doğrulama, geocoding + forecast iki aşamalı sorgu)
+- Aynı task mimarisi (Health, Network, NtpSync, UdpCmd, InternalComm), gerçek FreeRTOS/ESP-IDF ortamında, heap sızıntısı olmadan çalışmaktadır
 
 **Karşılaşılan ve çözülen platform-özel sorunlar:**
 - ESP-IDF'in `getaddrinfo()` fonksiyonu, `AF_INET` (IPv4) istenmesine rağmen sonuç listesinde IPv6 girdileri döndürebilmektedir; `Net_AdresCozumle`'ın ESP32 implementasyonu, listede **gerçekten IPv4 olan** ilk sonucu arayacak şekilde yazılmıştır.
 - `app_main(void)`, Windows'taki `main(argc, argv)`'den farklı olarak parametre almaz; rol ve bağlantı bilgileri (`app_config.h`) derleme zamanı sabitleri olarak, ayrı ve `.gitignore` ile korunan bir dosyada tutulur (WiFi şifresinin depoya sızmaması için `app_config.example.h` şablonu paylaşılır).
+- **Stack taşması (TLS):** `Net_HttpsGet` içindeki 4KB'lık yanıt buffer'ının fonksiyon stack'inde tutulması, `mbedtls`'in derin çağrı zincirleriyle birleşince stack taşmasına yol açmıştır; buffer `static` yapılmış ve HTTPS işlemi yapan görevlerin stack boyutu (16KB) büyütülmüştür — TLS'in ESP32'de stack açısından pahalı bir işlem olduğu gözlemlenmiştir.
+- **ESP-IDF v6.1'de bileşen bölünmesi:** `driver` bileşeni peripheral bazında ayrı bileşenlere (`esp_driver_uart` vb.) bölünmüş, `esp_vfs_dev.h` yerine `driver/uart_vfs.h` kullanılması gerekmiştir.
+- **Konsol UART bloklamayan okuma:** ESP-IDF'in varsayılan konsol sürücüsü `stdin`'i bloklayıcı okumaya uygun yapılandırılmamıştır; `uart_driver_install` ve `uart_vfs_dev_*` fonksiyonlarıyla elle yapılandırılarak, interaktif komut girişi (aşağıya bakınız) mümkün kılınmıştır.
+
+### Runtime Şehir Sorgusu — ESP32'den Gerçek Donanımda Doğrulandı
+
+ESP32, **SUBSCRIBER** rolünde çalışır ve mentörümün tasarladığı akışa birebir uyar: **kendi başına Open-Meteo'ya gitmez**, bunun yerine seri konsoldan girilen şehir ismini `{"topic":"cmd/sehir_sorgu","payload":"..."}` olarak broker'a (kısa süreli, ayrı bir bağlantıyla) gönderir. Broker, sorguyu işleyip sonucu **tüm subscriber'lara** yayınlar; ESP32'nin **kalıcı** subscriber bağlantısı bu yayını otomatik olarak alır ve loglar.
+
+Bu akış, broker ve ESP32 loglarındaki **birebir eşleşen sıcaklık değerleriyle** doğrulanmıştır:
+```
+# Broker (laptop):
+[ClientHandler] Sehir sorgu komutu alindi: bursa
+[HavaAPI] 'bursa' anlik sicaklik: 29.7 C
+
+# ESP32 (kalıcı subscriber bağlantısı üzerinden, otomatik):
+[InternalComm] Veri islendi -> topic: sensor/anlik_sicaklik, payload: 29.7
+```
 
 **Kurulum:** ESP-IDF v6.1+, VS Code ESP-IDF eklentisi. Detaylı adımlar `esp32/README_TR.md` içindedir.
 
@@ -278,7 +296,8 @@ Her platform, aynı arayüzün **kendi implementasyonunu** sağlar; `main.c` **t
 - [x] NTP ile gerçek zaman senkronizasyonu (DNS çözümleme, UDP NTP paket alışverişi, JSON mesajlarına Unix timestamp eklenmesi)
 - [x] Open-Meteo API entegrasyonu (WinHTTP/HTTPS, geocoding + anlık hava durumu, config dosyası + runtime komutuyla çift yönlü şehir seçimi)
 - [x] Anlık hava sorgu sonuçlarının (koordinat + sıcaklık + zaman) `anlik_hava_log.csv`'ye kalıcı olarak kaydedilmesi
-- [x] Taşınabilirlik: network katmanının soyutlanması (`net_port.h`), Windows implementasyonu ve ESP32 (ESP-IDF/lwIP) implementasyonu, gerçek ESP32 donanımında uçtan uca test edildi (WiFi + broker bağlantısı + JSON mesajlaşma + NTP)
+- [x] Taşınabilirlik: network katmanının soyutlanması (`net_port.h`), Windows implementasyonu ve ESP32 (ESP-IDF/lwIP) implementasyonu, gerçek ESP32 donanımında uçtan uca test edildi (WiFi + broker bağlantısı + JSON mesajlaşma + NTP + HTTPS/Open-Meteo)
+- [x] ESP32'nin SUBSCRIBER olarak, broker üzerinden runtime şehir sorgusu yapabilmesi (`cmd/sehir_sorgu`), broker ve ESP32 loglarındaki birebir eşleşen değerlerle doğrulandı
 
 ## Bilinen Kısıtlamalar
 
