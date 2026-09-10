@@ -61,7 +61,14 @@ NetSocket_t Net_DinlemeBaslat(int port)
 }
 NetSocket_t Net_BaglantiKabulEt(NetSocket_t s) { return accept((int)s, NULL, NULL); }
 NetSocket_t Net_UdpDinlemeBaslat(int port) { return bind_socket(port, SOCK_DGRAM); }
-NetSocket_t Net_UdpSocketOlustur(void) { return socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); }
+NetSocket_t Net_UdpSocketOlustur(void)
+{
+    int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s < 0) {
+        printf("[NetPort] HATA: UDP socket olusturulamadi, errno: %d (%s)\n", errno, strerror(errno));
+    }
+    return s;
+}
 
 NetSocket_t Net_Baglan(const char *ip, int port)
 {
@@ -142,10 +149,17 @@ int Net_UdpAl(NetSocket_t s, char *buffer, int size, NetAdres_t *sender)
 
 int Net_UdpGonder(NetSocket_t s, const char *data, int len, const NetAdres_t *target)
 {
-    if (!target || !data || len < 0 || target->xUzunluk != sizeof(struct sockaddr_in)) return NET_SONUC_HATA;
+    if (!target || !data || len < 0 || target->xUzunluk != sizeof(struct sockaddr_in)) {
+        printf("[NetPort] HATA: Net_UdpGonder - gecersiz parametre (xUzunluk=%d, beklenen=%d)\n",
+               target ? target->xUzunluk : -1, (int)sizeof(struct sockaddr_in));
+        return NET_SONUC_HATA;
+    }
     struct sockaddr_in addr;
     memcpy(&addr, target->ucVeri, sizeof(addr));
     int n = sendto((int)s, data, len, 0, (struct sockaddr *)&addr, sizeof(addr));
+    if (n < 0) {
+        printf("[NetPort] HATA: sendto basarisiz, errno: %d (%s)\n", errno, strerror(errno));
+    }
     return n < 0 ? NET_SONUC_HATA : n;
 }
 
@@ -153,16 +167,33 @@ bool Net_AdresCozumle(const char *host, int port, NetAdres_t *out)
 {
     if (!host || !out || port < 1 || port > 65535) return false;
     memset(out, 0, sizeof(*out));
+
     struct addrinfo hints = {.ai_family = AF_INET, .ai_socktype = SOCK_DGRAM};
     struct addrinfo *addr = NULL;
     char service[8];
     snprintf(service, sizeof(service), "%d", port);
+
     if (getaddrinfo(host, service, &hints, &addr) != 0 || !addr) return false;
-    bool ok = addr->ai_addrlen <= sizeof(out->ucVeri);
-    if (ok) {
-        memcpy(out->ucVeri, addr->ai_addr, addr->ai_addrlen);
-        out->xUzunluk = (int)addr->ai_addrlen;
+
+    /* lwIP bazen ai_family=AF_INET istememize RAGMEN sonuc listesinde
+     * IPv6 girdileri de dondurebiliyor. Listede GERCEKTEN IPv4 olan
+     * (ai_family==AF_INET, boyutu sockaddr_in ile uyusan) ilk sonucu
+     * bulana kadar geziyoruz - ilk sonucu KORKORU kullanmiyoruz. */
+    bool ok = false;
+    for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+        if (p->ai_family == AF_INET && p->ai_addrlen == sizeof(struct sockaddr_in)
+            && p->ai_addrlen <= sizeof(out->ucVeri)) {
+            memcpy(out->ucVeri, p->ai_addr, p->ai_addrlen);
+            out->xUzunluk = (int)p->ai_addrlen;
+            ok = true;
+            break;
+        }
     }
+
+    if (!ok) {
+        printf("[NetPort] HATA: '%s' icin gecerli bir IPv4 adresi bulunamadi.\n", host);
+    }
+
     freeaddrinfo(addr);
     return ok;
 }
