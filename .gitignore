@@ -1,0 +1,33 @@
+# Derleme çıktıları
+build/
+*.exe
+*.obj
+*.o
+# Broker/subscriber log dosyalari (test sirasinda olusturulan)
+*.log
+broker_log.txt
+subscriber_log.txt
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+
+# FreeRTOS Kernel kaynak kodu (ayrı olarak indirilir, repoya dahil edilmez)
+FreeRTOS-Kernel-Source/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# ESP32 / ESP-IDF
+esp32/build/
+esp32/managed_components/
+esp32/sdkconfig
+esp32/sdkconfig.old
+esp32/app_config.h
