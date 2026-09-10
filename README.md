@@ -269,6 +269,14 @@ Bu akış, broker ve ESP32 loglarındaki **birebir eşleşen sıcaklık değerle
 [InternalComm] Veri islendi -> topic: sensor/anlik_sicaklik, payload: 29.7
 ```
 
+### SPIFFS — Gerçek Veri Kaynağı ESP32'de
+
+ESP32, Windows portuyla **veri kaynağı açısından da eşdeğerdir**: `ankara_sicaklik_verileri.csv` (1022 kayıt, 68 şehir) ve `sehir_config.json`, derleme sırasında `spiffs_data/` klasöründen özel bir SPIFFS imajına gömülür ve flash'lama sırasında ayrı bir partition olarak cihaza yüklenir. Bunun için:
+
+- Özel bir partition tablosu (`partitions.csv`) tanımlanmıştır — kartın gerçek 4MB flash'ını kullanacak şekilde (bootloader tespiti, varsayılan 2MB'lık partition tablosunun yetersiz kaldığını göstermiştir), `factory` (uygulama) ve `storage` (SPIFFS) bölümlerine ayrılmıştır.
+- `main/CMakeLists.txt`'ye eklenen `spiffs_create_partition_image` komutu, her derlemede bu dosyaları otomatik olarak paketler.
+- `app_main`'de SPIFFS `/spiffs` yoluna bağlanır (mount edilir); dosya okuma fonksiyonları (`prvSicaklikVerisiYukle`, `prvSehirConfigYukle` — Windows koduyla birebir aynı) bu yoldan okur.
+
 **Kurulum:** ESP-IDF v6.1+, VS Code ESP-IDF eklentisi. Detaylı adımlar `esp32/README_TR.md` içindedir.
 
 ## Güvenlik
@@ -298,6 +306,7 @@ Bu akış, broker ve ESP32 loglarındaki **birebir eşleşen sıcaklık değerle
 - [x] Anlık hava sorgu sonuçlarının (koordinat + sıcaklık + zaman) `anlik_hava_log.csv`'ye kalıcı olarak kaydedilmesi
 - [x] Taşınabilirlik: network katmanının soyutlanması (`net_port.h`), Windows implementasyonu ve ESP32 (ESP-IDF/lwIP) implementasyonu, gerçek ESP32 donanımında uçtan uca test edildi (WiFi + broker bağlantısı + JSON mesajlaşma + NTP + HTTPS/Open-Meteo)
 - [x] ESP32'nin SUBSCRIBER olarak, broker üzerinden runtime şehir sorgusu yapabilmesi (`cmd/sehir_sorgu`), broker ve ESP32 loglarındaki birebir eşleşen değerlerle doğrulandı
+- [x] SPIFFS entegrasyonu: ESP32, gerçek veri setini (1022 kayıt) ve şehir config'ini kendi flash'inden okuyor — Windows ve ESP32 artık veri kaynağı açısından da eşdeğer
 
 ## Bilinen Kısıtlamalar
 
@@ -307,11 +316,11 @@ Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak 
 
 Bu ortamda, **birden fazla görevin aynı anda WinHTTP çağrısı yapması güvenilir sonuç vermemektedir** (test sırasında zaman aşımı hataları gözlemlenmiştir). Bu, projenin bir hatası olmaktan çok, bu simülasyon portunun HTTPS istemci kütüphanesiyle etkileşimindeki bir kısıtlama olarak değerlendirilmektedir; çözüm olarak dış API erişimi bir mutex ile serileştirilmiştir (bkz. "Open-Meteo API Entegrasyonu" bölümü).
 
-ESP32 tarafında, dosya sistemi (SPIFFS) henüz bağlanmadığı için `ankara_sicaklik_verileri.csv` ve `sehir_config.json` okunamamaktadır; sistem bu durumda (Windows tarafında da olduğu gibi) otomatik olarak rastgele veri üretimine döner. Bu, sistemin çökmesini önleyen, bilinçli bir yedek davranıştır; kalıcı çözüm (SPIFFS entegrasyonu) yol haritasındadır.
+ESP32'de dosya sistemi bulunmadığında (örn. `spiffs_data/` içeriği eksikse) sistem otomatik olarak rastgele veri üretimine döner — bu, çökmeyi önleyen bilinçli bir yedek davranıştır.
 
 ## Yol Haritası
 
-- [ ] Genişletilmiş ESP32 doğrulaması (SPIFFS ile config/veri seti dosyalarının okunması, Wi-Fi üzerinden Open-Meteo/HTTPS testi)
+Şu an için ek bir madde bulunmamaktadır — mentörden gelecek yeni görevlere göre güncellenecektir.
 
 ## Proje Yapısı
 
@@ -338,6 +347,8 @@ ESP32 tarafında, dosya sistemi (SPIFFS) henüz bağlanmadığı için `ankara_s
 │   │   ├── wifi_connect.c/h         # WiFi bağlantı yönetimi
 │   │   ├── app_config.example.h     # WiFi/broker ayarları şablonu
 │   │   └── CMakeLists.txt
+│   ├── spiffs_data/                 # SPIFFS imajına gömülen dosyalar (CSV + config)
+│   ├── partitions.csv                # Özel partition tablosu (factory + storage/spiffs)
 │   ├── CMakeLists.txt
 │   └── README_TR.md
 └── README.md
