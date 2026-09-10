@@ -18,6 +18,8 @@
 #include "esp_random.h"
 #include <sys/time.h>
 #include <time.h>        /* time_t icin */
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
 
 
 #define MAX_SICAKLIK_KAYIT 1100   
@@ -191,10 +193,112 @@ static time_t prvSuankiUnixZaman( void );
 static void vAnlikHavaTask( void *pvParameters );
 static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
 static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu );
+static void prvKonsolBaslat(void);
 
 
+/* =======================================================================
+ * vSehirSorguTask()
+ *
+ * ESP32'nin seri portu (monitor ekrani) uzerinden interaktif sehir
+ * sorgusu. Kullanici bir sehir yazip Enter'a basinca, o sehrin anlik
+ * sicakligini ve koordinatlarini Open-Meteo'dan cekip ekrana basar.
+ * Kalici olarak calisir (kendini SILMEZ) - test_subscriber.py'nin
+ * ESP32 uzerindeki karsiligi gibi dusunulebilir.
+ * ===================================================================== */
+static void vSehirSorguTask(void *pvParameters)
+{
+    (void) pvParameters;
+
+    vTaskDelay(pdMS_TO_TICKS(6000));
+
+    char satir[64];
+    size_t uzunluk;
+
+    for( ;; )
+    {
+        printf("\nSorgulanacak sehir (yazip Enter'a bas): ");
+        fflush(stdout);
+
+        uzunluk = 0;
+        satir[0] = '\0';
+
+        for( ;; )
+        {
+            int ch = getchar();
+
+            if( ch == '\r' || ch == '\n' )
+            {
+                printf("\n");
+                break;
+            }
+            else if( ch == 127 || ch == '\b' )
+            {
+                if( uzunluk > 0 )
+                {
+                    uzunluk--;
+                    printf("\b \b");
+                    fflush(stdout);
+                }
+            }
+            else if( ch >= 32 && ch < 127 && uzunluk < sizeof(satir) - 1 )
+            {
+                satir[uzunluk++] = (char) ch;
+                putchar(ch);
+                fflush(stdout);
+            }
+        }
+
+        satir[uzunluk] = '\0';
+
+        if( uzunluk == 0 )
+        {
+            continue;
+        }
+
+        /* Broker'a KISA SURELI, AYRI bir baglanti ac - sadece komut
+         * gondermek icin. Asil (surekli acik) subscriber baglantimiz
+         * (vNetworkTask icinde calisan) cevabi ZATEN otomatik alacak -
+         * mentorumun istedigi "broker herkese yayinlar" akisi budur. */
+        printf("[SehirSorgu] '%s' icin broker'a komut gonderiliyor...\n", satir);
+
+        NetSocket_t komutSoket = Net_Baglan( cBrokerIP, xPortNumarasi );
+
+        if( komutSoket == NET_INVALID_SOCKET )
+        {
+            printf("[SehirSorgu] HATA: broker'a baglanilamadi.\n");
+            continue;
+        }
+
+        char kimlikMesaji[128];
+        snprintf(kimlikMesaji, sizeof(kimlikMesaji), "AUTH:%s|ROLE:SUBSCRIBER\n", SHARED_AUTH_TOKEN);
+        Net_Gonder(komutSoket, kimlikMesaji, (int) strlen(kimlikMesaji));
+
+        vTaskDelay(pdMS_TO_TICKS(300));   /* authentication'in islenmesi icin kisa bekleme */
+
+        cJSON *komutRoot = cJSON_CreateObject();
+        cJSON_AddStringToObject(komutRoot, "topic", "cmd/sehir_sorgu");
+        cJSON_AddStringToObject(komutRoot, "payload", satir);
+
+        char *komutJsonStr = cJSON_PrintUnformatted(komutRoot);
+        char gonderilecekKomut[128];
+        snprintf(gonderilecekKomut, sizeof(gonderilecekKomut), "%s\n", komutJsonStr);
+
+        Net_Gonder(komutSoket, gonderilecekKomut, (int) strlen(gonderilecekKomut));
+
+        cJSON_free(komutJsonStr);
+        cJSON_Delete(komutRoot);
+
+        vTaskDelay(pdMS_TO_TICKS(300));   /* mesajin gonderilmesini garanti altina al */
+        Net_Kapat(komutSoket);
+
+        printf("[SehirSorgu] Komut gonderildi - cevabi yukaridaki log akisinda ara "
+               "(InternalComm topic: sensor/anlik_sicaklik).\n");
+    }
+}
 void app_main(void)
 {
+    prvKonsolBaslat();   /* EN BASTA - digerlerinden once */
+
     setvbuf(stdout, NULL, _IONBF, 0);
     xMyRole = ESP32_ROL;
     if (xMyRole < ROLE_BROKER || xMyRole > ROLE_SUBSCRIBER) {
@@ -227,7 +331,42 @@ void app_main(void)
         configASSERT(xStatusTimer);
         configASSERT(xTimerStart(xStatusTimer, 0) == pdPASS);
     }
+    /* Interaktif sehir sorgu task'i - kalici, hic silinmiyor. TLS/HTTPS
+    * icin genis stack (16KB) gerekiyor - mbedtls'in derin fonksiyon
+    * cagrilari nedeniyle. */
+    xTaskCreate(vSehirSorguTask, "SehirSorgu", 16384, NULL, tskIDLE_PRIORITY + 1, NULL);
+   
 }
+/* =======================================================================
+ * prvKonsolBaslat()
+ *
+ * ESP-IDF'in varsayilan konsol surucusu, stdin'i BLOKLAYICI okumaya
+ * uygun sekilde yapilandirilmamis oluyor - bu yuzden fgets() hemen,
+ * BOS bir sonucla donuyor, sonsuz hizli bir donguye yol aciyordu. Bu
+ * fonksiyon, UART surucusunu dogru sekilde kurup VFS'e (dosya sistemi
+ * arayuzune) baglayarak, fgets()'in GERCEKTEN kullanici Enter'a
+ * basana kadar beklemesini sagliyor.
+ * ===================================================================== */
+static void prvKonsolBaslat(void)
+{
+    setvbuf(stdin, NULL, _IONBF, 0);
+
+    uart_vfs_dev_port_set_rx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM, ESP_LINE_ENDINGS_CR);
+    uart_vfs_dev_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM, ESP_LINE_ENDINGS_CRLF);
+
+    const uart_config_t uart_config = {
+        .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, 256, 0, 0, NULL, 0);
+    uart_param_config(CONFIG_ESP_CONSOLE_UART_NUM, &uart_config);
+    uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+}
+
 
 
 /* =======================================================================
@@ -283,7 +422,7 @@ static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi )
     AnlikHavaSonucu_t sonuc;
     memset( &sonuc, 0, sizeof( sonuc ) );
 
-    char cevapBuffer[ 4096 ];
+    static char cevapBuffer[ 4096 ];
     char yolBuffer[ 256 ];
 
     /* --- ASAMA 1: GEOCODING (sehir adi -> koordinat) --- */
@@ -845,7 +984,7 @@ static void vHealthTask( void *pvParameters )
             }
         }
 
-        vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( 5000 ) );
+        vTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( 25000 ) );
     }
 }
 
