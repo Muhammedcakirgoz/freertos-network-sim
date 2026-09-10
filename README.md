@@ -221,6 +221,38 @@ Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek, kaynağı 
 - Dosya bulunamazsa, sistem otomatik olarak eski (rastgele) veri üretim yöntemine döner — bu sayede program veri seti olmadan da çalışmaya devam eder.
 - Python Kontrol Paneli üzerinden başlatılan süreçlerin de bu dosyayı doğru bulabilmesi için, `subprocess.Popen` çağrısında çalışma dizini (`cwd`) `.exe` dosyasının bulunduğu klasöre sabitlenmiştir.
 
+## Taşınabilirlik — Network Soyutlama Katmanı ve ESP32 Desteği
+
+Proje, tek bir platforma (Windows) kilitli kalmayacak şekilde tasarlanmıştır. Bu, FreeRTOS kernel'inin kendi "portable" mimarisiyle (her platform için ayrı bir port dosyası, aynı kernel API'si) **aynı prensipte** uygulanmıştır.
+
+### Mimari
+
+Ağ işlemleri (TCP, UDP, DNS, HTTPS, sistem zamanı), `net_port.h` adlı platformdan bağımsız bir arayüz üzerinden soyutlanmıştır. `main.c`, **hiçbir zaman** doğrudan platforma özel bir ağ fonksiyonu (Winsock, lwIP vb.) çağırmaz — sadece bu arayüzdeki `Net_*` fonksiyonlarını kullanır.
+
+```
+net_port.h              <- ORTAK ARAYÜZ (tüm platformlarda aynı)
+net_port_windows.c      <- Windows implementasyonu (Winsock + WinHTTP)
+esp32/main/
+  net_port_esp32.c      <- ESP32 implementasyonu (lwIP + esp_http_client)
+```
+
+Her platform, aynı arayüzün **kendi implementasyonunu** sağlar; `main.c` **tek satır bile değişmeden** her iki platformda da çalışır. Bu tasarım kararının doğrulama kriteri: `main.c` içinde `winsock`, `winhttp`, `WSA`, `SOCKET` gibi platforma özel terimlerin aranması sıfır sonuç vermelidir.
+
+### ESP32 Desteği
+
+`esp32/` klasöründe, ESP-IDF (v6.1) tabanlı ayrı bir proje bulunur. Aynı `main.c` ve `net_port.h`, ESP32'nin lwIP tabanlı `net_port_esp32.c` implementasyonuyla birlikte, **gerçek ESP32 donanımında** test edilmiştir:
+
+- WiFi üzerinden ağa bağlanma (`wifi_connect.c/h`)
+- Laptop'ta çalışan broker'a TCP üzerinden başarılı bağlantı, authentication ve JSON mesajlaşma
+- NTP senkronizasyonu (DNS + UDP), gerçek Unix zaman damgalarının JSON mesajlarına eklenmesi
+- Aynı task mimarisi (Health, Network, MqttPub, NtpSync, UdpCmd, InternalComm), gerçek FreeRTOS/ESP-IDF ortamında, heap sızıntısı olmadan çalışmaktadır
+
+**Karşılaşılan ve çözülen platform-özel sorunlar:**
+- ESP-IDF'in `getaddrinfo()` fonksiyonu, `AF_INET` (IPv4) istenmesine rağmen sonuç listesinde IPv6 girdileri döndürebilmektedir; `Net_AdresCozumle`'ın ESP32 implementasyonu, listede **gerçekten IPv4 olan** ilk sonucu arayacak şekilde yazılmıştır.
+- `app_main(void)`, Windows'taki `main(argc, argv)`'den farklı olarak parametre almaz; rol ve bağlantı bilgileri (`app_config.h`) derleme zamanı sabitleri olarak, ayrı ve `.gitignore` ile korunan bir dosyada tutulur (WiFi şifresinin depoya sızmaması için `app_config.example.h` şablonu paylaşılır).
+
+**Kurulum:** ESP-IDF v6.1+, VS Code ESP-IDF eklentisi. Detaylı adımlar `esp32/README_TR.md` içindedir.
+
 ## Güvenlik
 
 - **Authentication:** Token bazlı bağlantı doğrulama (`AUTH:token|ROLE:rol` formatı, framing mekanizmasının bir parçası)
@@ -246,6 +278,7 @@ Publisher, rastgele (`rand()`) sahte veri üretmek yerine, **gerçek, kaynağı 
 - [x] NTP ile gerçek zaman senkronizasyonu (DNS çözümleme, UDP NTP paket alışverişi, JSON mesajlarına Unix timestamp eklenmesi)
 - [x] Open-Meteo API entegrasyonu (WinHTTP/HTTPS, geocoding + anlık hava durumu, config dosyası + runtime komutuyla çift yönlü şehir seçimi)
 - [x] Anlık hava sorgu sonuçlarının (koordinat + sıcaklık + zaman) `anlik_hava_log.csv`'ye kalıcı olarak kaydedilmesi
+- [x] Taşınabilirlik: network katmanının soyutlanması (`net_port.h`), Windows implementasyonu ve ESP32 (ESP-IDF/lwIP) implementasyonu, gerçek ESP32 donanımında uçtan uca test edildi (WiFi + broker bağlantısı + JSON mesajlaşma + NTP)
 
 ## Bilinen Kısıtlamalar
 
@@ -255,15 +288,19 @@ Ayrıca, portun her FreeRTOS task'ını **gerçek bir Windows thread'i** olarak 
 
 Bu ortamda, **birden fazla görevin aynı anda WinHTTP çağrısı yapması güvenilir sonuç vermemektedir** (test sırasında zaman aşımı hataları gözlemlenmiştir). Bu, projenin bir hatası olmaktan çok, bu simülasyon portunun HTTPS istemci kütüphanesiyle etkileşimindeki bir kısıtlama olarak değerlendirilmektedir; çözüm olarak dış API erişimi bir mutex ile serileştirilmiştir (bkz. "Open-Meteo API Entegrasyonu" bölümü).
 
+ESP32 tarafında, dosya sistemi (SPIFFS) henüz bağlanmadığı için `ankara_sicaklik_verileri.csv` ve `sehir_config.json` okunamamaktadır; sistem bu durumda (Windows tarafında da olduğu gibi) otomatik olarak rastgele veri üretimine döner. Bu, sistemin çökmesini önleyen, bilinçli bir yedek davranıştır; kalıcı çözüm (SPIFFS entegrasyonu) yol haritasındadır.
+
 ## Yol Haritası
 
-- [ ] ESP32'ye taşınabilirlik (network katmanının soyutlanması)
+- [ ] Genişletilmiş ESP32 doğrulaması (SPIFFS ile config/veri seti dosyalarının okunması, Wi-Fi üzerinden Open-Meteo/HTTPS testi)
 
 ## Proje Yapısı
 
 ```
 .
-├── main.c                          # Ana uygulama kodu
+├── main.c                          # Ana uygulama kodu (platformdan bağımsız)
+├── net_port.h                       # Platformdan bağımsız ağ arayüzü
+├── net_port_windows.c                # Windows implementasyonu (Winsock + WinHTTP)
 ├── CMakeLists.txt                   # Derleme yapılandırması
 ├── FreeRTOSConfig.h                 # FreeRTOS kernel yapılandırma ayarları
 ├── monitor.py                       # Python/Tkinter kontrol paneli
@@ -274,6 +311,16 @@ Bu ortamda, **birden fazla görevin aynı anda WinHTTP çağrısı yapması güv
 ├── cJSON/
 │   ├── cJSON.c
 │   └── cJSON.h
+├── esp32/                           # ESP-IDF tabanlı ESP32 portu
+│   ├── main/
+│   │   ├── main.c                   # (Windows'taki ile aynı, platformdan bağımsız)
+│   │   ├── net_port.h
+│   │   ├── net_port_esp32.c         # ESP32 implementasyonu (lwIP + esp_http_client)
+│   │   ├── wifi_connect.c/h         # WiFi bağlantı yönetimi
+│   │   ├── app_config.example.h     # WiFi/broker ayarları şablonu
+│   │   └── CMakeLists.txt
+│   ├── CMakeLists.txt
+│   └── README_TR.md
 └── README.md
 ```
 
