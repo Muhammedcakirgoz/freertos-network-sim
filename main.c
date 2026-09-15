@@ -1,12 +1,5 @@
 #include "cJSON.h"
 #include "net_port.h"
-
-/* GECICI: HTTPS henuz port katmanina tasinmadi. winhttp.h, LPVOID/DWORD
- * gibi temel tipleri kendisi tanimlamiyor, windows.h'nin onceden
- * include edilmis olmasini bekliyor. Bu iki satir, HTTPS port
- * katmanina tasindiginda TAMAMEN KALDIRILACAK. */
-#include <windows.h>
-#include <winhttp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -178,6 +171,7 @@ static volatile bool bNtpSenkronize = false;
  * farkli task/context'ten erisildigi icin mutex ile koruyoruz. */
 static char cSuankiSehir[ 64 ] = "Ankara";
 static SemaphoreHandle_t xSehirMutex = NULL;
+static TaskHandle_t xAnlikHavaTaskHandle = NULL;
 
 
 static void vHealthTask( void *pvParameters );
@@ -199,13 +193,13 @@ static void vIdleTimeoutCallback( TimerHandle_t xTimer );
 static bool prvNtpSorgula( time_t *pxSonucUnixZaman );
 static void vNtpSyncTask( void *pvParameters );
 static time_t prvSuankiUnixZaman( void );
-static bool prvHttpsGet( const wchar_t *pcHost, const wchar_t *pcYol,
-                          char *pcCevapBuffer, size_t xBufferBoyutu );
-static void prvAsciiToWide( const char *pcKaynak, wchar_t *pcHedef, size_t xHedefBoyutu );
+
 static void prvSehirConfigYukle( const char *pcDosyaYolu );
 static void vAnlikHavaTask( void *pvParameters );
 static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
 static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu );
+static void prvAnlikHavaYayinla( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc );
+
 
 
 int main( int argc, char *argv[] )
@@ -382,20 +376,7 @@ else
 }
 }
 
-/* Basit ASCII -> wide-char (UTF-16) donusumu. WinHTTP fonksiyonlari
- * wide-char string bekliyor; bizim host/yol string'lerimiz her zaman
- * saf ASCII oldugu icin (Turkce karakter icermiyor), tek tek
- * genisletmek yeterli - tam bir Unicode donusum kutuphanesine
- * (MultiByteToWideChar) ihtiyacimiz yok. */
-static void prvAsciiToWide( const char *pcKaynak, wchar_t *pcHedef, size_t xHedefBoyutu )
-{
-    size_t i = 0;
-    for( ; i < xHedefBoyutu - 1 && pcKaynak[ i ] != '\0'; i++ )
-    {
-        pcHedef[ i ] = (wchar_t) pcKaynak[ i ];
-    }
-    pcHedef[ i ] = L'\0';
-}
+
 /* =======================================================================
  * prvUrlEncode()
  *
@@ -458,12 +439,11 @@ static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi )
     prvUrlEncode( pcSehirAdi, sehirKodlanmis, sizeof( sehirKodlanmis ) );
 
     snprintf( yolBuffer, sizeof( yolBuffer ),
-            "/v1/search?name=%s&count=1&language=tr&format=json",
-            sehirKodlanmis );
-    prvAsciiToWide( yolBuffer, yolWide, sizeof( yolWide ) / sizeof( wchar_t ) );
+          "/v1/search?name=%s&count=1&language=tr&format=json",
+          sehirKodlanmis );
 
-    if( !prvHttpsGet( L"geocoding-api.open-meteo.com", yolWide,
-                       cevapBuffer, sizeof( cevapBuffer ) ) )
+    if( !Net_HttpsGet( "geocoding-api.open-meteo.com", yolBuffer,
+                    cevapBuffer, sizeof( cevapBuffer ) ) )
     {
         printf( "[HavaAPI] HATA: Geocoding istegi basarisiz (%s).\n", pcSehirAdi );
         return sonuc;
@@ -507,12 +487,11 @@ static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi )
 
     /* --- ASAMA 2: FORECAST (koordinat -> ANLIK sicaklik) --- */
     snprintf( yolBuffer, sizeof( yolBuffer ),
-              "/v1/forecast?latitude=%.4f&longitude=%.4f&current_weather=true",
-              sonuc.enlem, sonuc.boylam );
-    prvAsciiToWide( yolBuffer, yolWide, sizeof( yolWide ) / sizeof( wchar_t ) );
+          "/v1/forecast?latitude=%.4f&longitude=%.4f&current_weather=true",
+          sonuc.enlem, sonuc.boylam );
 
-    if( !prvHttpsGet( L"api.open-meteo.com", yolWide,
-                       cevapBuffer, sizeof( cevapBuffer ) ) )
+    if( !Net_HttpsGet( "api.open-meteo.com", yolBuffer,
+                    cevapBuffer, sizeof( cevapBuffer ) ) )
     {
         printf( "[HavaAPI] HATA: Forecast istegi basarisiz.\n" );
         return sonuc;
@@ -619,6 +598,23 @@ static void vAnlikHavaTask( void *pvParameters )
 
     for( ;; )
     {
+
+       
+        /* 60 saniye bekle - AMA runtime komuttan bir "sifirlama" sinyali
+        * gelirse (ulTaskNotifyTake > 0 doner), bu, bir subscriber'in
+        * AZ ONCE bu sehri sorguladigi anlamina gelir - periyodik
+        * sorguyu ATLAYIP, sayaci bastan baslatiyoruz. Boylece ayni
+        * sehir, kisa surede iki kez sorgulanip kaydedilmiyor. */
+        uint32_t xBildirimSayisi = ulTaskNotifyTake( pdTRUE, pdMS_TO_TICKS( ANLIK_HAVA_SORGU_ARALIGI_MS ) );
+
+        if( xBildirimSayisi > 0 )
+        {
+            continue;   /* sifirlama sinyali geldi - bu turu atla */
+        }
+
+        /* ... buradan asagisi, mevcut kodun AYNEN devam ediyor (sehir okuma,
+        * API sorgusu, yayinlama, kaydetme) ... */
+
         char sehirKopyasi[ 64 ];
 
         if( xSemaphoreTake( xSehirMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
@@ -636,34 +632,14 @@ static void vAnlikHavaTask( void *pvParameters )
 
         if( sonuc.basarili )
         {
-            cJSON *havaRoot = cJSON_CreateObject();
-            cJSON_AddStringToObject( havaRoot, "topic", "sensor/anlik_sicaklik" );
-
-            char sicaklikStr[ 16 ];
-            snprintf( sicaklikStr, sizeof( sicaklikStr ), "%.1f", sonuc.sicaklik );
-            cJSON_AddStringToObject( havaRoot, "payload", sicaklikStr );
-            cJSON_AddStringToObject( havaRoot, "sehir", sehirKopyasi );
-            cJSON_AddNumberToObject( havaRoot, "zaman", (double) prvSuankiUnixZaman() );
-
-            char *havaJsonStr = cJSON_PrintUnformatted( havaRoot );
-            char gonderilecekHava[ 300 ];
-            snprintf( gonderilecekHava, sizeof( gonderilecekHava ), "%s\n", havaJsonStr );
-
-            xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-            for( int i = 0; i < xSubscriberCount; i++ )
-            {
-                Net_Gonder( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ));
-            }
-            xSemaphoreGive( xSubscriberListMutex );
-
-            cJSON_free( havaJsonStr );
-            cJSON_Delete( havaRoot );
+            prvAnlikHavaYayinla( sehirKopyasi, &sonuc );
 
             printf( "[AnlikHava] Periyodik yayin: %s = %.1f C\n", sehirKopyasi, sonuc.sicaklik );
+
             prvAnlikHavaKaydet( sehirKopyasi, &sonuc, prvSuankiUnixZaman() );
         }
 
-        vTaskDelay( pdMS_TO_TICKS( ANLIK_HAVA_SORGU_ARALIGI_MS ) );
+        
     }
 }
 
@@ -707,103 +683,40 @@ static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t 
     printf( "[AnlikHavaLog] Kaydedildi: %s (%.4f, %.4f) = %.1f C\n",
             pcSehirAdi, pxSonuc->enlem, pxSonuc->boylam, pxSonuc->sicaklik );
 }
-
-
 /* =======================================================================
- * prvHttpsGet()
+ * prvAnlikHavaYayinla()
  *
- * WinHTTP kullanarak bir HTTPS GET istegi atar, cevabin BODY kismini
- * pcCevapBuffer'a yazar. TLS/sertifika dogrulama gibi tum sifreleme
- * islerini WinHTTP bizim yerimize hallediyor - biz sadece "bu host'a,
- * bu yola git, cevabi getir" diyoruz.
+ * Bir anlik hava sonucunu JSON'a cevirip TUM subscriber'lara yayinlar.
+ * ONCEDEN bu kod, vAnlikHavaTask ve vClientHandlerTask'ta AYRI AYRI,
+ * neredeyse birebir tekrarlaniyordu (DRY ihlali) - bu fonksiyon, o
+ * tekrari TEK BIR yerde topluyor.
  * ===================================================================== */
-static bool prvHttpsGet( const wchar_t *pcHost, const wchar_t *pcYol,
-                          char *pcCevapBuffer, size_t xBufferBoyutu )
+static void prvAnlikHavaYayinla( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc )
 {
-    bool basarili = false;
-    HINTERNET hSession = NULL, hConnect = NULL, hRequest = NULL;
+    cJSON *havaRoot = cJSON_CreateObject();
+    cJSON_AddStringToObject( havaRoot, "topic", "sensor/anlik_sicaklik" );
 
-    hSession = WinHttpOpen( L"FreeRTOS-NetworkSim/1.0",
-                             WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                             WINHTTP_NO_PROXY_NAME,
-                             WINHTTP_NO_PROXY_BYPASS, 0 );
+    char sicaklikStr[ 16 ];
+    snprintf( sicaklikStr, sizeof( sicaklikStr ), "%.1f", pxSonuc->sicaklik );
+    cJSON_AddStringToObject( havaRoot, "payload", sicaklikStr );
+    cJSON_AddStringToObject( havaRoot, "sehir", pcSehirAdi );
+    cJSON_AddNumberToObject( havaRoot, "zaman", (double) prvSuankiUnixZaman() );
 
-    if( hSession == NULL )
+    char *havaJsonStr = cJSON_PrintUnformatted( havaRoot );
+    char gonderilecekHava[ 300 ];
+    snprintf( gonderilecekHava, sizeof( gonderilecekHava ), "%s\n", havaJsonStr );
+
+    xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+    for( int i = 0; i < xSubscriberCount; i++ )
     {
-        printf( "[HTTP] HATA: WinHttpOpen basarisiz, kod: %lu\n", GetLastError() );
-        return false;
+        Net_Gonder( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ) );
     }
+    xSemaphoreGive( xSubscriberListMutex );
 
-    hConnect = WinHttpConnect( hSession, pcHost, INTERNET_DEFAULT_HTTPS_PORT, 0 );
-
-    if( hConnect == NULL )
-    {
-        printf( "[HTTP] HATA: WinHttpConnect basarisiz, kod: %lu\n", GetLastError() );
-        WinHttpCloseHandle( hSession );
-        return false;
-    }
-
-    hRequest = WinHttpOpenRequest( hConnect, L"GET", pcYol,
-                                    NULL, WINHTTP_NO_REFERER,
-                                    WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                    WINHTTP_FLAG_SECURE );
-
-    if( hRequest == NULL )
-    {
-        printf( "[HTTP] HATA: WinHttpOpenRequest basarisiz, kod: %lu\n", GetLastError() );
-        WinHttpCloseHandle( hConnect );
-        WinHttpCloseHandle( hSession );
-        return false;
-    }
-
-    BOOL gonderildi = WinHttpSendRequest( hRequest,
-                                           WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0 );
-
-    if( gonderildi && WinHttpReceiveResponse( hRequest, NULL ) )
-    {
-        size_t toplamOkunan = 0;
-        DWORD mevcutVeri = 0;
-
-        do
-        {
-            mevcutVeri = 0;
-
-            if( !WinHttpQueryDataAvailable( hRequest, &mevcutVeri ) || mevcutVeri == 0 )
-            {
-                break;
-            }
-
-            if( toplamOkunan + mevcutVeri >= xBufferBoyutu )
-            {
-                mevcutVeri = (DWORD) ( xBufferBoyutu - toplamOkunan - 1 );
-            }
-
-            DWORD okunanBayt = 0;
-
-            if( !WinHttpReadData( hRequest, pcCevapBuffer + toplamOkunan, mevcutVeri, &okunanBayt ) )
-            {
-                break;
-            }
-
-            toplamOkunan += okunanBayt;
-
-        } while( mevcutVeri > 0 && toplamOkunan < xBufferBoyutu - 1 );
-
-        pcCevapBuffer[ toplamOkunan ] = '\0';
-        basarili = ( toplamOkunan > 0 );
-    }
-    else
-    {
-        printf( "[HTTP] HATA: istek/cevap basarisiz, kod: %lu\n", GetLastError() );
-    }
-
-    WinHttpCloseHandle( hRequest );
-    WinHttpCloseHandle( hConnect );
-    WinHttpCloseHandle( hSession );
-
-    return basarili;
+    cJSON_free( havaJsonStr );
+    cJSON_Delete( havaRoot );
 }
+
 
 
 
@@ -1107,13 +1020,12 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
     {
         case ROLE_BROKER:
         {
-            TaskHandle_t xAnlikHavaHandle = NULL;
             xResult = xTaskCreate( vAnlikHavaTask,
-                                    "AnlikHava",
-                                    STACK_SIZE_ANLIK_HAVA,
-                                    NULL,
-                                    PRIORITY_ANLIK_HAVA,
-                                    &xAnlikHavaHandle );
+                        "AnlikHava",
+                        STACK_SIZE_ANLIK_HAVA,
+                        NULL,
+                        PRIORITY_ANLIK_HAVA,
+                        &xAnlikHavaTaskHandle );
             configASSERT( xResult == pdPASS );
         }
         break;
@@ -1713,33 +1625,22 @@ static void vClientHandlerTask( void *pvParameters )
 
                             if( sonuc.basarili )
                             {
-                                cJSON *havaRoot = cJSON_CreateObject();
-                                cJSON_AddStringToObject( havaRoot, "topic", "sensor/anlik_sicaklik" );
-
-                                char sicaklikStr[ 16 ];
-                                snprintf( sicaklikStr, sizeof( sicaklikStr ), "%.1f", sonuc.sicaklik );
-                                cJSON_AddStringToObject( havaRoot, "payload", sicaklikStr );
-                                cJSON_AddStringToObject( havaRoot, "sehir", cSuankiSehir );
-                                cJSON_AddNumberToObject( havaRoot, "zaman", (double) prvSuankiUnixZaman() );
-
-                                char *havaJsonStr = cJSON_PrintUnformatted( havaRoot );
-                                char gonderilecekHava[ 300 ];
-                                snprintf( gonderilecekHava, sizeof( gonderilecekHava ), "%s\n", havaJsonStr );
-
-                                xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-                                for( int i = 0; i < xSubscriberCount; i++ )
-                                {
-                                    Net_Gonder( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ));
-                                }
-                                xSemaphoreGive( xSubscriberListMutex );
-
-                                cJSON_free( havaJsonStr );
-                                cJSON_Delete( havaRoot );
+                                prvAnlikHavaYayinla( cSuankiSehir, &sonuc );
 
                                 printf( "[ClientHandler] Anlik hava yayinlandi: %s = %.1f C\n",
                                         cSuankiSehir, sonuc.sicaklik );
+
                                 prvAnlikHavaKaydet( cSuankiSehir, &sonuc, prvSuankiUnixZaman() );
+                                 /* Periyodik gorevin sayacini SIFIRLA - az once ayni sehri
+                            * biz sorguladik, periyodik gorev hemen ardindan TEKRAR
+                            * sormasin. */
+                            if( xAnlikHavaTaskHandle != NULL )
+                            {
+                                xTaskNotifyGive( xAnlikHavaTaskHandle );
                             }
+                        }
+
+                            
                             else
                             {
                                 printf( "[ClientHandler] HATA: '%s' icin anlik hava alinamadi.\n", cSuankiSehir );
