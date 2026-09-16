@@ -13,40 +13,11 @@
 
 
 #include <time.h>        /* time_t icin */
+#include "ntp.h"    
+#include "subscribers.h"
+#include "weather.h"
+#define MAX_SICAKLIK_KAYIT 1100   
 
-
-#define MAX_SICAKLIK_KAYIT 1100
-
-
-/* Standart 48 byte'lik NTP paket formati (RFC 5905). */
-typedef struct
-{
-    uint8_t  li_vn_mode;
-    uint8_t  stratum;
-    uint8_t  poll;
-    uint8_t  precision;
-    uint32_t rootDelay;
-    uint32_t rootDispersion;
-    uint32_t refId;
-    uint32_t refTm_s;
-    uint32_t refTm_f;
-    uint32_t origTm_s;
-    uint32_t origTm_f;
-    uint32_t rxTm_s;
-    uint32_t rxTm_f;
-    uint32_t txTm_s;   /* bizim ilgilendigimiz alan - sunucunun cevabi gonderdigi an */
-    uint32_t txTm_f;
-} NtpPaketi_t;
-
-typedef struct
-{
-    bool  basarili;
-    float sicaklik;
-    float enlem;
-    float boylam;
-} AnlikHavaSonucu_t;
-
-static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi );
 
 
 typedef struct
@@ -112,20 +83,16 @@ static QueueHandle_t xPublishQueue = NULL;
 #define STACK_SIZE_NETWORK         ( configMINIMAL_STACK_SIZE * 6 )
 #define STACK_SIZE_MQTT            ( configMINIMAL_STACK_SIZE * 4 )
 #define STACK_SIZE_CLIENT_HANDLER  ( configMINIMAL_STACK_SIZE * 8 )   /* HTTPS istegi + 4KB yerel buffer icin buyutuldu */
-#define MAX_CLIENTS                 5
 #define SHARED_AUTH_TOKEN           "gizli_sifre123"
 #define DEFAULT_PORT         8080
 #define DEFAULT_BROKER_IP    "127.0.0.1"
 #define STACK_SIZE_UDP_COMMAND     ( configMINIMAL_STACK_SIZE * 4 )
 #define IDLE_TIMEOUT_MS   30000   /* 30 saniye hic baglanti gelmezse kapan */
 
-#define NTP_SERVER              "pool.ntp.org"
 #define NTP_PORT                123
 #define NTP_SYNC_INTERVAL_MS    ( 5 * 60 * 1000 )   /* 5 dakikada bir yeniden senkronize et */
-#define NTP_UNIX_EPOCH_FARKI    2208988800UL         /* 1900-1970 arasi saniye farki */
 
 #define STACK_SIZE_ANLIK_HAVA      ( configMINIMAL_STACK_SIZE * 8 )   /* WinHTTP icin biraz daha fazla stack */
-#define ANLIK_HAVA_SORGU_ARALIGI_MS   ( 60 * 1000 )   /* 60 saniyede bir sorgula */
 
 
 /* ---------------------------------------------------------------------
@@ -138,9 +105,9 @@ static QueueHandle_t xPublishQueue = NULL;
  * ClientHandlerTask (her biri farkli bir client icin calisan) bu listeye
  * AYNI ANDA erisebilir - bu yuzden bir MUTEX ile korumak zorundayiz.
  * ------------------------------------------------------------------- */
-static NetSocket_t xSubscriberSockets[ MAX_CLIENTS ];
-static int    xSubscriberCount = 0;
-static SemaphoreHandle_t xSubscriberListMutex = NULL;
+SemaphoreHandle_t xSubscriberListMutex = NULL;
+NetSocket_t xSubscriberSockets[ MAX_CLIENTS ];
+int xSubscriberCount = 0;
 
 
 static TaskHandle_t xHealthTaskHandle          = NULL;
@@ -160,18 +127,13 @@ static bool bBilerekKapatiliyor = false;
 static int  xPortNumarasi = DEFAULT_PORT;
 static char cBrokerIP[ 64 ] = DEFAULT_BROKER_IP;
 
-/* NTP'den alinan zaman ile yerel tick sayaci arasindaki fark (saniye).
- * Bu ofset, periyodik olarak NTP ile yeniden senkronize edilir; aradaki
- * surede ise projenin kendi "real-time clock"u gibi calisir - her an
- * icin agdan tekrar sormaya gerek kalmadan hesaplanabilir. */
-static volatile time_t xUnixZamanOfseti = 0;
-static volatile bool bNtpSenkronize = false;
+
 /* Su anki secili sehir - hem config dosyasindan hem runtime komuttan
  * (subscriber'dan gelen cmd/sehir_sorgu ile) degistirilebiliyor. Iki
  * farkli task/context'ten erisildigi icin mutex ile koruyoruz. */
-static char cSuankiSehir[ 64 ] = "Ankara";
-static SemaphoreHandle_t xSehirMutex = NULL;
-static TaskHandle_t xAnlikHavaTaskHandle = NULL;
+char cSuankiSehir[ 64 ] = "Ankara";
+SemaphoreHandle_t xSehirMutex = NULL;
+TaskHandle_t xAnlikHavaTaskHandle = NULL;
 
 
 static void vHealthTask( void *pvParameters );
@@ -182,23 +144,16 @@ static void vMqttSubscriberTask( void *pvParameters );
 static void vClientHandlerTask( void *pvParameters );
 
 static SystemRole_t prvParseRoleFromArgs( int argc, char *argv[] );
-static void prvParseNetworkArgsFromArgs( int argc, char *argv[] );
-static void prvPrintUsage( const char *pcProgramName );
+static void prvParseNetworkArgsFromArgs( int argc, char *argv[] );  
+static void prvPrintUsage( const char *pcProgramName );  
 static void prvCreateTasksForRole( SystemRole_t xRole );
 static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
 static void vUdpCommandTask( void *pvParameters );
 static void vIdleTimeoutCallback( TimerHandle_t xTimer );
 
-static bool prvNtpSorgula( time_t *pxSonucUnixZaman );
-static void vNtpSyncTask( void *pvParameters );
-static time_t prvSuankiUnixZaman( void );
 
 static void prvSehirConfigYukle( const char *pcDosyaYolu );
-static void vAnlikHavaTask( void *pvParameters );
-static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
-static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu );
-static void prvAnlikHavaYayinla( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc );
 static void prvAuthenticationIsle( NetSocket_t clientSocket, const char *pcMesajBuffer,
                                     bool *pbIsAuthenticated, bool *pbIsSubscriber );
 static void prvSehirSorguKomutunuIsle( const char *pcSehir );
@@ -218,7 +173,7 @@ int main( int argc, char *argv[] )
      * TAM TAMPONLAMA kullanir, bu da ciktinin "gec, toplu halde"
      * gelmesine sebep olur. */
     setvbuf( stdout, NULL, _IONBF, 0 );
-
+    
     /* Ag katmanini baslat - platformdan bagimsiz. Windows'ta WSAStartup
     * cagirir, ESP32'de muhtemelen hicbir sey yapmayacak, ama uygulama
     * kodu bu farki GORMEZ. */
@@ -227,8 +182,8 @@ int main( int argc, char *argv[] )
         return EXIT_FAILURE;
     }
 
-
-
+    
+    
     /* 1) ADIM: Rolu belirle - HENUZ FreeRTOS scheduler baslamadi,
      *    normal C kodu olarak calisiyoruz. */
     xMyRole = prvParseRoleFromArgs( argc, argv );
@@ -249,7 +204,7 @@ int main( int argc, char *argv[] )
             ( xMyRole == ROLE_PUBLISHER )  ? "PUBLISHER"  :
                                               "SUBSCRIBER" );
     printf( "=================================================\n\n" );
-
+    
 
     /* Subscriber listesini koruyacak mutex'i olustur - scheduler
     * baslamadan once, herkesten once hazir olmali. */
@@ -339,28 +294,12 @@ int main( int argc, char *argv[] )
     * (ozellikle publisher) calismaya baslamadan once, xUnixZamanOfseti
     * zaten dogru deger ile dolu oluyor - "zaman: 0" gibi anlamsiz ilk
     * mesajlarin onune geciliyor. */
-    {
-        time_t ilkSenkronZamani;
-
-        printf( "[NTP] Baslangic senkronizasyonu yapiliyor...\n" );
-
-        if( prvNtpSorgula( &ilkSenkronZamani ) )
-        {
-            xUnixZamanOfseti = ilkSenkronZamani;   /* tick henuz 0'a yakin, offset ~= sunucu zamani */
-            bNtpSenkronize = true;
-            printf( "[NTP] Baslangic senkronizasyonu basarili.\n" );
-        }
-        else
-        {
-            printf( "[NTP] UYARI: Baslangic senkronizasyonu basarisiz - "
-                    "vNtpSyncTask periyodik olarak tekrar deneyecek.\n" );
-        }
-    }
+    Ntp_BaslangicSenkronizasyonuYap();
 
     /* 3) ADIM: Scheduler'i baslat - bu satirdan sonra kontrol
      *    bir daha asla buraya donmez. */
     vTaskStartScheduler();
-
+    
 
    /* Buraya iki sebepten ulasilabilir:
     * 1) Gercek bir hata - scheduler hic baslayamadi (yetersiz heap)
@@ -373,170 +312,14 @@ int main( int argc, char *argv[] )
         Net_Temizle();
         return EXIT_SUCCESS;
     }
-else
-{
-    printf( "HATA: Scheduler baslatilamadi (yetersiz heap olabilir)\n" );
-    Net_Temizle();
-    return EXIT_FAILURE;
-}
-}
-
-
-/* =======================================================================
- * prvUrlEncode()
- *
- * URL'ye konacak metindeki HARF/RAKAM DISI her byte'i (bosluk, Turkce
- * ozel karakterler gibi) "%XX" (hex) formatina cevirir - HTTP/URL
- * standardinin gerektirdigi gibi. Bu, hem dogru bir HTTP istegi
- * olusturmamizi saglar, hem de UTF-8 cok baytli karakterlerin
- * prvAsciiToWide tarafindan YANLIS parcalanmasini ONLER - cunku
- * kodlama sonrasi metin, sadece ASCII (harf, rakam, %) icerir.
- * ===================================================================== */
-static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu )
-{
-    static const char *hexRakamlar = "0123456789ABCDEF";
-    size_t j = 0;
-
-    for( size_t i = 0; pcKaynak[ i ] != '\0' && j < xHedefBoyutu - 4; i++ )
+    else
     {
-        unsigned char c = (unsigned char) pcKaynak[ i ];
-
-        if( ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) ||
-            ( c >= '0' && c <= '9' ) || c == '-' || c == '_' || c == '.' || c == '~' )
-        {
-            /* Bu karakterler URL'de guvenli, kodlamaya gerek yok. */
-            pcHedef[ j++ ] = (char) c;
-        }
-        else
-        {
-            /* Diger her sey (bosluk, Turkce karakterlerin UTF-8
-             * byte'lari vb.) "%XX" formatina cevriliyor. */
-            pcHedef[ j++ ] = '%';
-            pcHedef[ j++ ] = hexRakamlar[ c >> 4 ];
-            pcHedef[ j++ ] = hexRakamlar[ c & 0x0F ];
-        }
+        printf( "HATA: Scheduler baslatilamadi (yetersiz heap olabilir)\n" );
+        Net_Temizle();
+        return EXIT_FAILURE;
     }
-
-    pcHedef[ j ] = '\0';
 }
 
-
-/* =======================================================================
- * prvSehirAnlikSicaklikGetir()
- *
- * IKI ASAMALI sorgu:
- * 1) Geocoding: sehir ADI -> enlem/boylam (Open-Meteo Geocoding API)
- * 2) Forecast: enlem/boylam -> ANLIK sicaklik (Open-Meteo Forecast API)
- *
- * Ikisi de HTTPS uzerinden, cJSON ile ayristirilarak.
- * ===================================================================== */
-static AnlikHavaSonucu_t prvSehirAnlikSicaklikGetir( const char *pcSehirAdi )
-{
-    AnlikHavaSonucu_t sonuc;
-    memset( &sonuc, 0, sizeof( sonuc ) );
-
-    char cevapBuffer[ 4096 ];
-    char yolBuffer[ 256 ];
-    wchar_t yolWide[ 256 ];
-
-    /* --- ASAMA 1: GEOCODING (sehir adi -> koordinat) --- */
-    char sehirKodlanmis[ 128 ];
-    prvUrlEncode( pcSehirAdi, sehirKodlanmis, sizeof( sehirKodlanmis ) );
-
-    snprintf( yolBuffer, sizeof( yolBuffer ),
-          "/v1/search?name=%s&count=1&language=tr&format=json",
-          sehirKodlanmis );
-
-    if( !Net_HttpsGet( "geocoding-api.open-meteo.com", yolBuffer,
-                    cevapBuffer, sizeof( cevapBuffer ) ) )
-    {
-        printf( "[HavaAPI] HATA: Geocoding istegi basarisiz (%s).\n", pcSehirAdi );
-        return sonuc;
-    }
-
-    cJSON *geoJson = cJSON_Parse( cevapBuffer );
-
-    if( geoJson == NULL )
-    {
-        printf( "[HavaAPI] HATA: Geocoding cevabi gecersiz JSON.\n" );
-        return sonuc;
-    }
-
-    cJSON *sonuclar = cJSON_GetObjectItem( geoJson, "results" );
-
-    if( sonuclar == NULL || !cJSON_IsArray( sonuclar ) || cJSON_GetArraySize( sonuclar ) == 0 )
-    {
-        printf( "[HavaAPI] HATA: '%s' icin sonuc bulunamadi.\n", pcSehirAdi );
-        cJSON_Delete( geoJson );
-        return sonuc;
-    }
-
-    cJSON *ilkSonuc = cJSON_GetArrayItem( sonuclar, 0 );
-    cJSON *enlemItem = cJSON_GetObjectItem( ilkSonuc, "latitude" );
-    cJSON *boylamItem = cJSON_GetObjectItem( ilkSonuc, "longitude" );
-
-    if( enlemItem == NULL || boylamItem == NULL )
-    {
-        printf( "[HavaAPI] HATA: koordinat alanlari eksik.\n" );
-        cJSON_Delete( geoJson );
-        return sonuc;
-    }
-
-    sonuc.enlem = (float) enlemItem->valuedouble;
-    sonuc.boylam = (float) boylamItem->valuedouble;
-
-    cJSON_Delete( geoJson );
-
-    printf( "[HavaAPI] '%s' icin koordinat bulundu: (%.4f, %.4f)\n",
-            pcSehirAdi, sonuc.enlem, sonuc.boylam );
-
-    /* --- ASAMA 2: FORECAST (koordinat -> ANLIK sicaklik) --- */
-    snprintf( yolBuffer, sizeof( yolBuffer ),
-          "/v1/forecast?latitude=%.4f&longitude=%.4f&current_weather=true",
-          sonuc.enlem, sonuc.boylam );
-
-    if( !Net_HttpsGet( "api.open-meteo.com", yolBuffer,
-                    cevapBuffer, sizeof( cevapBuffer ) ) )
-    {
-        printf( "[HavaAPI] HATA: Forecast istegi basarisiz.\n" );
-        return sonuc;
-    }
-
-    cJSON *havaJson = cJSON_Parse( cevapBuffer );
-
-    if( havaJson == NULL )
-    {
-        printf( "[HavaAPI] HATA: Forecast cevabi gecersiz JSON.\n" );
-        return sonuc;
-    }
-
-    cJSON *anlikHava = cJSON_GetObjectItem( havaJson, "current_weather" );
-
-    if( anlikHava == NULL )
-    {
-        printf( "[HavaAPI] HATA: 'current_weather' alani bulunamadi.\n" );
-        cJSON_Delete( havaJson );
-        return sonuc;
-    }
-
-    cJSON *sicaklikItem = cJSON_GetObjectItem( anlikHava, "temperature" );
-
-    if( sicaklikItem == NULL )
-    {
-        printf( "[HavaAPI] HATA: 'temperature' alani bulunamadi.\n" );
-        cJSON_Delete( havaJson );
-        return sonuc;
-    }
-
-    sonuc.sicaklik = (float) sicaklikItem->valuedouble;
-    sonuc.basarili = true;
-
-    cJSON_Delete( havaJson );
-
-    printf( "[HavaAPI] '%s' anlik sicaklik: %.1f C\n", pcSehirAdi, sonuc.sicaklik );
-
-    return sonuc;
-}
 
 /* =======================================================================
  * prvSehirConfigYukle()
@@ -586,271 +369,6 @@ static void prvSehirConfigYukle( const char *pcDosyaYolu )
 
     cJSON_Delete( configJson );
 }
-/* =======================================================================
- * vAnlikHavaTask()
- *
- * Periyodik olarak (60 saniyede bir), o anki secili sehrin ANLIK
- * sicakligini Open-Meteo'dan cekip "sensor/anlik_sicaklik" topic'iyle
- * TUM subscriber'lara yayinlar. Sadece BROKER rolunde calisir.
- * ===================================================================== */
-static void vAnlikHavaTask( void *pvParameters )
-{
-    ( void ) pvParameters;
-
-    /* Ilk sorgu icin biraz bekle - NTP/DNS gibi diger baslangic
-     * islemlerine firsat taniyoruz. */
-    vTaskDelay( pdMS_TO_TICKS( 5000 ) );
-
-    for( ;; )
-    {
-
-
-        /* 60 saniye bekle - AMA runtime komuttan bir "sifirlama" sinyali
-        * gelirse (ulTaskNotifyTake > 0 doner), bu, bir subscriber'in
-        * AZ ONCE bu sehri sorguladigi anlamina gelir - periyodik
-        * sorguyu ATLAYIP, sayaci bastan baslatiyoruz. Boylece ayni
-        * sehir, kisa surede iki kez sorgulanip kaydedilmiyor. */
-        uint32_t xBildirimSayisi = ulTaskNotifyTake( pdTRUE, pdMS_TO_TICKS( ANLIK_HAVA_SORGU_ARALIGI_MS ) );
-
-        if( xBildirimSayisi > 0 )
-        {
-            continue;   /* sifirlama sinyali geldi - bu turu atla */
-        }
-
-        /* ... buradan asagisi, mevcut kodun AYNEN devam ediyor (sehir okuma,
-        * API sorgusu, yayinlama, kaydetme) ... */
-
-        char sehirKopyasi[ 64 ];
-
-        if( xSemaphoreTake( xSehirMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
-        {
-            strncpy( sehirKopyasi, cSuankiSehir, sizeof( sehirKopyasi ) - 1 );
-            sehirKopyasi[ sizeof( sehirKopyasi ) - 1 ] = '\0';
-            xSemaphoreGive( xSehirMutex );
-        }
-        else
-        {
-            strncpy( sehirKopyasi, "Ankara", sizeof( sehirKopyasi ) - 1 );
-        }
-
-        AnlikHavaSonucu_t sonuc = prvSehirAnlikSicaklikGetir( sehirKopyasi );
-
-        if( sonuc.basarili )
-        {
-            prvAnlikHavaYayinla( sehirKopyasi, &sonuc );
-
-            printf( "[AnlikHava] Periyodik yayin: %s = %.1f C\n", sehirKopyasi, sonuc.sicaklik );
-
-            prvAnlikHavaKaydet( sehirKopyasi, &sonuc, prvSuankiUnixZaman() );
-        }
-
-
-    }
-}
-
-/* =======================================================================
- * prvAnlikHavaKaydet()
- *
- * Her basarili anlik hava sorgusunu, CSV formatinda bir dosyaya EKLER
- * (append). Zamanla, program calistikca, sistemin KENDI gerceklestirdigi
- * gercek API sorgularindan olusan, buyuyen bir veri gunlugu birikir -
- * mentorumun bahsettigi "tablo" fikrinin, sistemin kendisi tarafindan
- * otomatik olarak tutulan hali.
- * ===================================================================== */
-static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman )
-{
-    /* Dosya daha once var miydi kontrol et - yoksa basligi (header) yaz. */
-    FILE *kontrolFp = fopen( "anlik_hava_log.csv", "r" );
-    bool dosyaVarMi = ( kontrolFp != NULL );
-    if( kontrolFp != NULL )
-    {
-        fclose( kontrolFp );
-    }
-
-    FILE *fp = fopen( "anlik_hava_log.csv", "a" );
-
-    if( fp == NULL )
-    {
-        printf( "[AnlikHavaLog] UYARI: log dosyasi acilamadi.\n" );
-        return;
-    }
-
-    if( !dosyaVarMi )
-    {
-        fprintf( fp, "zaman,sehir,enlem,boylam,sicaklik\n" );
-    }
-
-    fprintf( fp, "%lld,%s,%.4f,%.4f,%.1f\n",
-             (long long) zaman, pcSehirAdi, pxSonuc->enlem, pxSonuc->boylam, pxSonuc->sicaklik );
-
-    fclose( fp );
-
-    printf( "[AnlikHavaLog] Kaydedildi: %s (%.4f, %.4f) = %.1f C\n",
-            pcSehirAdi, pxSonuc->enlem, pxSonuc->boylam, pxSonuc->sicaklik );
-}
-/* =======================================================================
- * prvAnlikHavaYayinla()
- *
- * Bir anlik hava sonucunu JSON'a cevirip TUM subscriber'lara yayinlar.
- * ONCEDEN bu kod, vAnlikHavaTask ve vClientHandlerTask'ta AYRI AYRI,
- * neredeyse birebir tekrarlaniyordu (DRY ihlali) - bu fonksiyon, o
- * tekrari TEK BIR yerde topluyor.
- * ===================================================================== */
-static void prvAnlikHavaYayinla( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc )
-{
-    cJSON *havaRoot = cJSON_CreateObject();
-    cJSON_AddStringToObject( havaRoot, "topic", "sensor/anlik_sicaklik" );
-
-    char sicaklikStr[ 16 ];
-    snprintf( sicaklikStr, sizeof( sicaklikStr ), "%.1f", pxSonuc->sicaklik );
-    cJSON_AddStringToObject( havaRoot, "payload", sicaklikStr );
-    cJSON_AddStringToObject( havaRoot, "sehir", pcSehirAdi );
-    cJSON_AddNumberToObject( havaRoot, "zaman", (double) prvSuankiUnixZaman() );
-
-    char *havaJsonStr = cJSON_PrintUnformatted( havaRoot );
-    char gonderilecekHava[ 300 ];
-    snprintf( gonderilecekHava, sizeof( gonderilecekHava ), "%s\n", havaJsonStr );
-
-    xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-    for( int i = 0; i < xSubscriberCount; i++ )
-    {
-        Net_Gonder( xSubscriberSockets[ i ], gonderilecekHava, (int) strlen( gonderilecekHava ) );
-    }
-    xSemaphoreGive( xSubscriberListMutex );
-
-    cJSON_free( havaJsonStr );
-    cJSON_Delete( havaRoot );
-}
-
-
-
-
-/* =======================================================================
- * prvNtpSorgula()
- *
- * TEK BIR NTP sorgusu yapar: DNS ile sunucuyu bulur, UDP ile 48 byte'lik
- * istek paketi gonderir, cevabi okuyup Unix zamanina cevirir.
- * ===================================================================== */
-static bool prvNtpSorgula( time_t *pxSonucUnixZaman )
-{
-    NetAdres_t xSunucuAdresi;
-
-    /* --- DNS COZUMLEME (platformdan bagimsiz) --- */
-    if( !Net_AdresCozumle( NTP_SERVER, NTP_PORT, &xSunucuAdresi ) )
-    {
-        printf( "[NTP] HATA: DNS cozumleme basarisiz (%s).\n", NTP_SERVER );
-        return false;
-    }
-
-    printf( "[NTP] DNS cozumlendi: %s\n", NTP_SERVER );
-
-    NetSocket_t xNtpSoket = Net_UdpSocketOlustur();
-
-    if( xNtpSoket == NET_INVALID_SOCKET )
-    {
-        printf( "[NTP] HATA: soket olusturulamadi.\n" );
-        return false;
-    }
-
-    /* Sonsuza kadar beklemesin diye 3 saniyelik zaman asimi. */
-    Net_ZamanAsimiAyarla( xNtpSoket, 3000 );
-
-    NtpPaketi_t paket;
-    memset( &paket, 0, sizeof( paket ) );
-    paket.li_vn_mode = 0x1B;   /* LI=0, VN=3 (NTPv3), Mode=3 (client istegi) */
-
-    int gonderilen = Net_UdpGonder( xNtpSoket, (const char *) &paket,
-                                     sizeof( paket ), &xSunucuAdresi );
-
-    if( gonderilen < 0 )
-    {
-        printf( "[NTP] HATA: veri gonderilemedi.\n" );
-        Net_Kapat( xNtpSoket );
-        return false;
-    }
-
-    int alinan = Net_Al( xNtpSoket, (char *) &paket, sizeof( paket ) );
-    Net_Kapat( xNtpSoket );
-
-    if( alinan != (int) sizeof( paket ) )
-    {
-        printf( "[NTP] HATA: gecersiz cevap (beklenen %d byte, alinan %d byte).\n",
-                (int) sizeof( paket ), alinan );
-        return false;
-    }
-
-    /* txTm_s: sunucunun cevabi GONDERDIGI andaki, 1900'den beri gecen
-     * saniye. Network byte order'dan (buyuk-endian) makinemizin byte
-     * order'ina ceviriyoruz, sonra 1970 referansina kaydiriyoruz.
-     *
-     * NOT: ntohl() yerine ELLE bit kaydirma kullaniyoruz - boylece
-     * bu kod, Winsock'a (ya da baska bir platform kutuphanesine)
-     * BAGIMLI OLMADAN, her platformda AYNI sekilde calisiyor. */
-    uint8_t *pucByte = (uint8_t *) &paket.txTm_s;
-    uint32_t txTm_s = ( (uint32_t) pucByte[ 0 ] << 24 ) |
-                      ( (uint32_t) pucByte[ 1 ] << 16 ) |
-                      ( (uint32_t) pucByte[ 2 ] << 8  ) |
-                      ( (uint32_t) pucByte[ 3 ] );
-
-    *pxSonucUnixZaman = (time_t) ( txTm_s - NTP_UNIX_EPOCH_FARKI );
-
-    return true;
-}
-
-/* =======================================================================
- * vNtpSyncTask()
- *
- * Periyodik olarak (5 dakikada bir) NTP sunucusuyla senkronize olur.
- * Basarili her senkronizasyonda, "NTP zamani - yerel tick zamani"
- * farkini (offset) gunceller - boylece aradaki surede aga gitmeden,
- * dogrudan tick sayacindan gercek zaman hesaplanabilir.
- * ===================================================================== */
-static void vNtpSyncTask( void *pvParameters )
-{
-    ( void ) pvParameters;
-
-    for( ;; )
-    {
-        time_t sunucuZamani;
-
-        if( prvNtpSorgula( &sunucuZamani ) )
-        {
-            TickType_t suankiTick = xTaskGetTickCount();
-            time_t tickSaniye = (time_t) ( ( (uint64_t) suankiTick * portTICK_PERIOD_MS ) / 1000 );
-
-            xUnixZamanOfseti = sunucuZamani - tickSaniye;
-            bNtpSenkronize = true;
-
-            printf( "[NTP] Senkronize edildi. Sunucu zamani (Unix): %lld\n",
-                    (long long) sunucuZamani );
-        }
-        else
-        {
-            printf( "[NTP] Senkronizasyon basarisiz, %d saniye sonra tekrar denenecek.\n",
-                    NTP_SYNC_INTERVAL_MS / 1000 );
-        }
-
-        vTaskDelay( pdMS_TO_TICKS( NTP_SYNC_INTERVAL_MS ) );
-    }
-}
-
-/* =======================================================================
- * prvSuankiUnixZaman()
- *
- * "Su an kac" sorusunun cevabi - aga hic gitmeden, kaydedilen offset ve
- * o anki tick sayacindan hesaplar. NTP hic senkronize olmadiysa (henuz
- * ilk sorgu yapilmadiysa), offset 0'dir, donen deger sadece "tick
- * sayacinin saniyeye cevrilmis hali" olur (anlamli bir gercek zaman
- * DEGILDIR, bilgi amaclidir).
- * ===================================================================== */
-static time_t prvSuankiUnixZaman( void )
-{
-    TickType_t suankiTick = xTaskGetTickCount();
-    time_t tickSaniye = (time_t) ( ( (uint64_t) suankiTick * portTICK_PERIOD_MS ) / 1000 );
-
-    return xUnixZamanOfseti + tickSaniye;
-}
-
 
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
 {
@@ -1064,7 +582,7 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
 }
 
 /* =======================================================================
- * TASK IMPLEMENTASYONLARI
+ * TASK IMPLEMENTASYONLARI 
  * ===================================================================== */
 
 /* Task durumunu insan okunur metne ceviren yardimci fonksiyon. */
@@ -1095,7 +613,7 @@ static void vHealthTask( void *pvParameters )
         /* Zaman damgasini BURADA, tum printf'lerden ONCE yakaliyoruz -
         * boylece olcum, sadece "ag + islem" gecikmesini yansitir,
         * konsol yazma suresini DEGIL. */
-
+        
 
         printf( "\n[Health] ===== SISTEM SAGLIK RAPORU =====\n" );
         printf( "[Health] Heap: %u byte bos / %u toplam (doluluk: %%%d)\n",
@@ -1156,7 +674,7 @@ static void vHealthTask( void *pvParameters )
                 * instance'lar arasi gecikme olcumu icin - "zaman" ise NTP'den gelen,
                 * DUNYA CAPINDA anlamli, gercek zamandir. Ikisi FARKLI amaclar icin,
                 * ikisini de tutuyoruz. */
-                cJSON_AddNumberToObject( healthPayload, "zaman", (double) prvSuankiUnixZaman() );
+                cJSON_AddNumberToObject( healthPayload, "zaman", (double) Ntp_SuankiZaman() );
 
 
                 /* cJSON_AddItemToObject: healthPayload'i healthRoot'a "tasir" -
@@ -1234,7 +752,7 @@ static void vNetworkTask( void *pvParameters )
             clientSocket = Net_BaglantiKabulEt( listenSocket );;
 
             if( clientSocket != NET_INVALID_SOCKET  )
-            {
+            {       
                     xSonBaglantiZamani = xTaskGetTickCount();  /* idle-timeout sayacini sifirla */
                     printf( "[Network] Yeni bir client baglandi! Kendi task'i olusturuluyor...\n" );
 
@@ -1282,13 +800,13 @@ static void vNetworkTask( void *pvParameters )
             }
         }
 
-
+            
 
             /* Test amacli: periyodik olarak basit bir mesaj gonder.
             * Boylece TCP baglantisi uzerinden GERCEKTEN veri aktigini
             * gozlemleyebilecegiz. Faz 4'te bu, gercek JSON verisiyle
             * degistirilecek. */
-
+           
             printf( "[Network] Broker'a basariyla baglanildi!\n" );
 
             /* Kendimizi broker'a tanitiyoruz - ilk mesaj olarak rol bilgimizi
@@ -1321,7 +839,7 @@ static void vNetworkTask( void *pvParameters )
                     cJSON_AddStringToObject( root, "sehir", gelenVeri.sehir );
                     cJSON_AddStringToObject( root, "tarih", gelenVeri.tarih );
                     cJSON_AddStringToObject( root, "durum", gelenVeri.durum );
-                    cJSON_AddNumberToObject( root, "zaman", (double) prvSuankiUnixZaman() );
+                    cJSON_AddNumberToObject( root, "zaman", (double) Ntp_SuankiZaman() );
 
                     char *jsonString = cJSON_PrintUnformatted( root );
 
@@ -1338,7 +856,7 @@ static void vNetworkTask( void *pvParameters )
         }
         else
         {
-
+            
             Net_NonBlockingYap( clientSocket );
 
             char recvBuffer[ 256 ];
@@ -1611,16 +1129,15 @@ static void prvSehirSorguKomutunuIsle( const char *pcSehir )
         xSemaphoreGive( xSehirMutex );
     }
 
-    AnlikHavaSonucu_t sonuc = prvSehirAnlikSicaklikGetir( cSuankiSehir );
-
+    AnlikHavaSonucu_t sonuc = Weather_SehirSorgula( cSuankiSehir );
     if( sonuc.basarili )
     {
-        prvAnlikHavaYayinla( cSuankiSehir, &sonuc );
+        Weather_Yayinla( cSuankiSehir, &sonuc );
 
         printf( "[ClientHandler] Anlik hava yayinlandi: %s = %.1f C\n",
                 cSuankiSehir, sonuc.sicaklik );
 
-        prvAnlikHavaKaydet( cSuankiSehir, &sonuc, prvSuankiUnixZaman() );
+        Weather_Kaydet( cSuankiSehir, &sonuc );
 
         if( xAnlikHavaTaskHandle != NULL )
         {
@@ -1865,7 +1382,7 @@ static void vStatusBroadcastCallback( TimerHandle_t xTimer )
     /* YENI: NTP ile senkronize edilmis gercek zaman - tutarlilik icin
     * diger tum mesaj tiplerinde (sensor/sicaklik, system/health) oldugu
     * gibi burada da ekleniyor. */
-    cJSON_AddNumberToObject( statusRoot, "zaman", (double) prvSuankiUnixZaman() );
+    cJSON_AddNumberToObject( statusRoot, "zaman", (double) Ntp_SuankiZaman() );
 
     char *statusJson = cJSON_PrintUnformatted( statusRoot );
     char gonderilecek[ 300 ];
@@ -1989,7 +1506,7 @@ static void vMqttSubscriberTask( void *pvParameters )
         printf( "[MqttSub] Gelen veri bekleniyor...\n" );
         vTaskDelay( pdMS_TO_TICKS( 2000 ) );
     }
-
+    
 }
 
 
