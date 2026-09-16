@@ -15,7 +15,7 @@
 #include <time.h>        /* time_t icin */
 
 
-#define MAX_SICAKLIK_KAYIT 1100   
+#define MAX_SICAKLIK_KAYIT 1100
 
 
 /* Standart 48 byte'lik NTP paket formati (RFC 5905). */
@@ -182,8 +182,8 @@ static void vMqttSubscriberTask( void *pvParameters );
 static void vClientHandlerTask( void *pvParameters );
 
 static SystemRole_t prvParseRoleFromArgs( int argc, char *argv[] );
-static void prvParseNetworkArgsFromArgs( int argc, char *argv[] );  
-static void prvPrintUsage( const char *pcProgramName );  
+static void prvParseNetworkArgsFromArgs( int argc, char *argv[] );
+static void prvPrintUsage( const char *pcProgramName );
 static void prvCreateTasksForRole( SystemRole_t xRole );
 static void vStatusBroadcastCallback( TimerHandle_t xTimer );
 static void prvSicaklikVerisiYukle( const char *pcDosyaYolu );
@@ -199,7 +199,12 @@ static void vAnlikHavaTask( void *pvParameters );
 static void prvAnlikHavaKaydet( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc, time_t zaman );
 static void prvUrlEncode( const char *pcKaynak, char *pcHedef, size_t xHedefBoyutu );
 static void prvAnlikHavaYayinla( const char *pcSehirAdi, const AnlikHavaSonucu_t *pxSonuc );
-
+static void prvAuthenticationIsle( NetSocket_t clientSocket, const char *pcMesajBuffer,
+                                    bool *pbIsAuthenticated, bool *pbIsSubscriber );
+static void prvSehirSorguKomutunuIsle( const char *pcSehir );
+static void prvNormalVeriYayinla( const char *pcMesajBuffer );
+static void prvGelenMesajiIsle( bool bIsSubscriber, char *pcMesajBuffer );
+static void prvClientHandlerTemizle( NetSocket_t clientSocket, bool bIsSubscriber );
 
 
 int main( int argc, char *argv[] )
@@ -213,7 +218,7 @@ int main( int argc, char *argv[] )
      * TAM TAMPONLAMA kullanir, bu da ciktinin "gec, toplu halde"
      * gelmesine sebep olur. */
     setvbuf( stdout, NULL, _IONBF, 0 );
-    
+
     /* Ag katmanini baslat - platformdan bagimsiz. Windows'ta WSAStartup
     * cagirir, ESP32'de muhtemelen hicbir sey yapmayacak, ama uygulama
     * kodu bu farki GORMEZ. */
@@ -222,8 +227,8 @@ int main( int argc, char *argv[] )
         return EXIT_FAILURE;
     }
 
-    
-    
+
+
     /* 1) ADIM: Rolu belirle - HENUZ FreeRTOS scheduler baslamadi,
      *    normal C kodu olarak calisiyoruz. */
     xMyRole = prvParseRoleFromArgs( argc, argv );
@@ -244,7 +249,7 @@ int main( int argc, char *argv[] )
             ( xMyRole == ROLE_PUBLISHER )  ? "PUBLISHER"  :
                                               "SUBSCRIBER" );
     printf( "=================================================\n\n" );
-    
+
 
     /* Subscriber listesini koruyacak mutex'i olustur - scheduler
     * baslamadan once, herkesten once hazir olmali. */
@@ -355,7 +360,7 @@ int main( int argc, char *argv[] )
     /* 3) ADIM: Scheduler'i baslat - bu satirdan sonra kontrol
      *    bir daha asla buraya donmez. */
     vTaskStartScheduler();
-    
+
 
    /* Buraya iki sebepten ulasilabilir:
     * 1) Gercek bir hata - scheduler hic baslayamadi (yetersiz heap)
@@ -599,7 +604,7 @@ static void vAnlikHavaTask( void *pvParameters )
     for( ;; )
     {
 
-       
+
         /* 60 saniye bekle - AMA runtime komuttan bir "sifirlama" sinyali
         * gelirse (ulTaskNotifyTake > 0 doner), bu, bir subscriber'in
         * AZ ONCE bu sehri sorguladigi anlamina gelir - periyodik
@@ -639,7 +644,7 @@ static void vAnlikHavaTask( void *pvParameters )
             prvAnlikHavaKaydet( sehirKopyasi, &sonuc, prvSuankiUnixZaman() );
         }
 
-        
+
     }
 }
 
@@ -1059,7 +1064,7 @@ static void prvCreateTasksForRole( SystemRole_t xRole )
 }
 
 /* =======================================================================
- * TASK IMPLEMENTASYONLARI 
+ * TASK IMPLEMENTASYONLARI
  * ===================================================================== */
 
 /* Task durumunu insan okunur metne ceviren yardimci fonksiyon. */
@@ -1090,7 +1095,7 @@ static void vHealthTask( void *pvParameters )
         /* Zaman damgasini BURADA, tum printf'lerden ONCE yakaliyoruz -
         * boylece olcum, sadece "ag + islem" gecikmesini yansitir,
         * konsol yazma suresini DEGIL. */
-        
+
 
         printf( "\n[Health] ===== SISTEM SAGLIK RAPORU =====\n" );
         printf( "[Health] Heap: %u byte bos / %u toplam (doluluk: %%%d)\n",
@@ -1229,7 +1234,7 @@ static void vNetworkTask( void *pvParameters )
             clientSocket = Net_BaglantiKabulEt( listenSocket );;
 
             if( clientSocket != NET_INVALID_SOCKET  )
-            {       
+            {
                     xSonBaglantiZamani = xTaskGetTickCount();  /* idle-timeout sayacini sifirla */
                     printf( "[Network] Yeni bir client baglandi! Kendi task'i olusturuluyor...\n" );
 
@@ -1277,13 +1282,13 @@ static void vNetworkTask( void *pvParameters )
             }
         }
 
-            
+
 
             /* Test amacli: periyodik olarak basit bir mesaj gonder.
             * Boylece TCP baglantisi uzerinden GERCEKTEN veri aktigini
             * gozlemleyebilecegiz. Faz 4'te bu, gercek JSON verisiyle
             * degistirilecek. */
-           
+
             printf( "[Network] Broker'a basariyla baglanildi!\n" );
 
             /* Kendimizi broker'a tanitiyoruz - ilk mesaj olarak rol bilgimizi
@@ -1333,7 +1338,7 @@ static void vNetworkTask( void *pvParameters )
         }
         else
         {
-            
+
             Net_NonBlockingYap( clientSocket );
 
             char recvBuffer[ 256 ];
@@ -1470,22 +1475,20 @@ static void vClientHandlerTask( void *pvParameters )
 
     printf( "[ClientHandler] Yeni client task'i basladi (socket: %d)\n",
             (int) clientSocket );
-            xAktifClientSayisi++;
+    xAktifClientSayisi++;
 
-    
     Net_NonBlockingYap( clientSocket );
 
     char recvBuffer[ 256 ];
     char mesajBuffer[ 1024 ] = { 0 };
     int mesajBufferUzunluk = 0;
 
-    /* Authentication icin makul bir zaman asimi - sonsuza kadar
-     * bekleme, 5 saniyede gelmezse baglantiyi kapat. */
     TickType_t xBaglantiBaslangic = xTaskGetTickCount();
 
     for( ;; )
     {
         int bytesReceived = Net_Al( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1 );
+
         if( bytesReceived > 0 )
         {
             recvBuffer[ bytesReceived ] = '\0';
@@ -1501,180 +1504,15 @@ static void vClientHandlerTask( void *pvParameters )
             while( ( newlinePos = strchr( mesajBuffer, '\n' ) ) != NULL )
             {
                 *newlinePos = '\0';
-                int mesajUzunlugu = (int) strlen( mesajBuffer );
 
                 if( !bIsAuthenticated )
                 {
-                    /* --- ILK SATIR: AUTHENTICATION MESAJI ---
-                     * ARTIK ayri bir recv() DEGIL, mesajBuffer/framing
-                     * mekanizmasinin BIR PARCASI. Boylece client, AUTH
-                     * mesajindan hemen sonra baska mesajlar gonderse
-                     * bile (ayni TCP paketinde birlesmis olsalar
-                     * bile), her biri DOGRU sekilde, sirayla
-                     * ayristiriliyor. */
-                    char bufferKopyasi[ 256 ];
-                    strncpy( bufferKopyasi, mesajBuffer, sizeof( bufferKopyasi ) - 1 );
-                    bufferKopyasi[ sizeof( bufferKopyasi ) - 1 ] = '\0';
-
-                    char *authKismi = strtok( bufferKopyasi, "|" );
-                    char *roleKismi = strtok( NULL, "|" );
-
-                    bool bAuthBasarili = false;
-
-                    if( authKismi != NULL && strncmp( authKismi, "AUTH:", 5 ) == 0 )
-                    {
-                        const char *gelenToken = authKismi + 5;
-                        if( strcmp( gelenToken, SHARED_AUTH_TOKEN ) == 0 )
-                        {
-                            bAuthBasarili = true;
-                        }
-                    }
-
-                    if( !bAuthBasarili )
-                    {
-                        printf( "[ClientHandler] YETKISIZ BAGLANTI! Token dogrulanamadi, baglanti reddediliyor.\n" );
-                        Net_Kapat( clientSocket );
-                        vTaskDelete( NULL );
-                    }
-
-                    printf( "[ClientHandler] Authentication basarili.\n" );
-                    bIsAuthenticated = true;
-
-                    if( roleKismi != NULL && strcmp( roleKismi, "ROLE:SUBSCRIBER" ) == 0 )
-                    {
-                        bIsSubscriber = true;
-                        printf( "[ClientHandler] Bu client bir SUBSCRIBER.\n" );
-
-                        xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-                        if( xSubscriberCount < MAX_CLIENTS )
-                        {
-                            xSubscriberSockets[ xSubscriberCount ] = clientSocket;
-                            xSubscriberCount++;
-                        }
-                        xSemaphoreGive( xSubscriberListMutex );
-                    }
-                    else if( roleKismi != NULL && strcmp( roleKismi, "ROLE:PUBLISHER" ) == 0 )
-                    {
-                        printf( "[ClientHandler] Bu client bir PUBLISHER.\n" );
-                    }
-                    else
-                    {
-                        printf( "[ClientHandler] UYARI: Bilinmeyen rol, baglanti kapatiliyor.\n" );
-                        Net_Kapat( clientSocket );
-                        vTaskDelete( NULL );
-                    }
-                }
-                else if( mesajUzunlugu == 0 )
-                {
-                    printf( "[ClientHandler] UYARI: Bos mesaj alindi, yok sayiliyor.\n" );
-                }
-                else if( mesajUzunlugu > 200 )
-                {
-                    printf( "[ClientHandler] UYARI: Anormal uzunlukta mesaj (%d byte), "
-                            "reddediliyor.\n", mesajUzunlugu );
+                    prvAuthenticationIsle( clientSocket, mesajBuffer,
+                                            &bIsAuthenticated, &bIsSubscriber );
                 }
                 else
                 {
-                    cJSON *parsedJson = cJSON_Parse( mesajBuffer );
-
-                    if( parsedJson == NULL )
-                    {
-                        printf( "[ClientHandler] UYARI: Gecersiz JSON alindi, reddediliyor. "
-                                "Gelen: %s\n", mesajBuffer );
-                    }
-                    else
-                    {
-                        cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
-                        cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
-
-                        bool bGecerliMesaj = true;
-
-                        if( topicItem == NULL || !cJSON_IsString( topicItem ) )
-                        {
-                            printf( "[ClientHandler] UYARI: 'topic' alani eksik veya hatali tipte.\n" );
-                            bGecerliMesaj = false;
-                        }
-
-                        if( payloadItem == NULL || !cJSON_IsString( payloadItem ) )
-                        {
-                            printf( "[ClientHandler] UYARI: 'payload' alani eksik veya hatali tipte.\n" );
-                            bGecerliMesaj = false;
-                        }
-
-                        if( bIsSubscriber && topicItem != NULL && cJSON_IsString( topicItem ) &&
-                            strcmp( topicItem->valuestring, "cmd/sehir_sorgu" ) == 0 &&
-                            payloadItem != NULL && cJSON_IsString( payloadItem ) )
-                        {
-                            /* OZEL ISTISNA: subscriber'dan gelen bir "sehir sorgu" KOMUTU -
-                            * normal veri yayinlama yasaginin istisnasi. Bu sayede
-                            * subscriber'lar runtime'da sehir talep edebiliyor. */
-                            printf( "[ClientHandler] Sehir sorgu komutu alindi: %s\n",
-                                    payloadItem->valuestring );
-
-                            if( xSemaphoreTake( xSehirMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
-                            {
-                                strncpy( cSuankiSehir, payloadItem->valuestring, sizeof( cSuankiSehir ) - 1 );
-                                cSuankiSehir[ sizeof( cSuankiSehir ) - 1 ] = '\0';
-                                xSemaphoreGive( xSehirMutex );
-                            }
-
-                            /* Bu bloklayici bir HTTPS cagrisi - ama SADECE bu client'in kendi
-                            * task'ini bloklar, diger client'lari ETKILEMEZ (her client kendi
-                            * ClientHandlerTask'inda calisiyor). */
-                            AnlikHavaSonucu_t sonuc = prvSehirAnlikSicaklikGetir( cSuankiSehir );
-
-                            if( sonuc.basarili )
-                            {
-                                prvAnlikHavaYayinla( cSuankiSehir, &sonuc );
-
-                                printf( "[ClientHandler] Anlik hava yayinlandi: %s = %.1f C\n",
-                                        cSuankiSehir, sonuc.sicaklik );
-
-                                prvAnlikHavaKaydet( cSuankiSehir, &sonuc, prvSuankiUnixZaman() );
-                                 /* Periyodik gorevin sayacini SIFIRLA - az once ayni sehri
-                            * biz sorguladik, periyodik gorev hemen ardindan TEKRAR
-                            * sormasin. */
-                            if( xAnlikHavaTaskHandle != NULL )
-                            {
-                                xTaskNotifyGive( xAnlikHavaTaskHandle );
-                            }
-                        }
-
-                            
-                            else
-                            {
-                                printf( "[ClientHandler] HATA: '%s' icin anlik hava alinamadi.\n", cSuankiSehir );
-                            }
-                        }
-                        else if( bIsSubscriber )
-                        {
-                            printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
-                                    "calisti, veri reddediliyor. Gelen: %s\n", mesajBuffer );
-                        }
-                        else if( bGecerliMesaj )
-                        {
-                            printf( "[ClientHandler] Gecerli JSON alindi -> topic: %s, payload: %s\n",
-                                    topicItem->valuestring, payloadItem->valuestring );
-
-                            xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
-                            for( int i = 0; i < xSubscriberCount; i++ )
-                            {
-                                char gonderilecekMesaj[ 300 ];
-                                snprintf( gonderilecekMesaj, sizeof( gonderilecekMesaj ), "%s\n", mesajBuffer );
-                                Net_Gonder( xSubscriberSockets[ i ], gonderilecekMesaj, (int) strlen( gonderilecekMesaj ));
-                            }
-                            xSemaphoreGive( xSubscriberListMutex );
-
-                            printf( "[ClientHandler] Veri %d subscriber'a iletildi.\n", xSubscriberCount );
-                        }
-                        else
-                        {
-                            printf( "[ClientHandler] Mesaj eksik/hatali alanlar icerdigi icin "
-                                    "subscriber'lara iletilmedi.\n" );
-                        }
-
-                        cJSON_Delete( parsedJson );
-                    }
+                    prvGelenMesajiIsle( bIsSubscriber, mesajBuffer );
                 }
 
                 int islenenUzunluk = (int)( newlinePos - mesajBuffer ) + 1;
@@ -1694,7 +1532,6 @@ static void vClientHandlerTask( void *pvParameters )
             printf( "[ClientHandler] HATA: veri alinamadi - baglanti sonlandiriliyor.\n" );
             break;
         }
-        /* NET_SONUC_VERI_YOK durumunda hicbir sey yapmiyoruz - normal, devam. */
 
         if( !bIsAuthenticated &&
             ( xTaskGetTickCount() - xBaglantiBaslangic ) > pdMS_TO_TICKS( 5000 ) )
@@ -1705,17 +1542,190 @@ static void vClientHandlerTask( void *pvParameters )
 
         vTaskDelay( pdMS_TO_TICKS( 100 ) );
     }
+
+    prvClientHandlerTemizle( clientSocket, bIsSubscriber );
+    vTaskDelete( NULL );
+}
+static void prvAuthenticationIsle( NetSocket_t clientSocket, const char *pcMesajBuffer,
+                                    bool *pbIsAuthenticated, bool *pbIsSubscriber )
+{
+    char bufferKopyasi[ 256 ];
+    strncpy( bufferKopyasi, pcMesajBuffer, sizeof( bufferKopyasi ) - 1 );
+    bufferKopyasi[ sizeof( bufferKopyasi ) - 1 ] = '\0';
+
+    char *authKismi = strtok( bufferKopyasi, "|" );
+    char *roleKismi = strtok( NULL, "|" );
+
+    bool bAuthBasarili = false;
+
+    if( authKismi != NULL && strncmp( authKismi, "AUTH:", 5 ) == 0 )
+    {
+        const char *gelenToken = authKismi + 5;
+        if( strcmp( gelenToken, SHARED_AUTH_TOKEN ) == 0 )
+        {
+            bAuthBasarili = true;
+        }
+    }
+
+    if( !bAuthBasarili )
+    {
+        printf( "[ClientHandler] YETKISIZ BAGLANTI! Token dogrulanamadi, baglanti reddediliyor.\n" );
+        Net_Kapat( clientSocket );
+        vTaskDelete( NULL );
+    }
+
+    printf( "[ClientHandler] Authentication basarili.\n" );
+    *pbIsAuthenticated = true;
+
+    if( roleKismi != NULL && strcmp( roleKismi, "ROLE:SUBSCRIBER" ) == 0 )
+    {
+        *pbIsSubscriber = true;
+        printf( "[ClientHandler] Bu client bir SUBSCRIBER.\n" );
+
+        xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+        if( xSubscriberCount < MAX_CLIENTS )
+        {
+            xSubscriberSockets[ xSubscriberCount ] = clientSocket;
+            xSubscriberCount++;
+        }
+        xSemaphoreGive( xSubscriberListMutex );
+    }
+    else if( roleKismi != NULL && strcmp( roleKismi, "ROLE:PUBLISHER" ) == 0 )
+    {
+        printf( "[ClientHandler] Bu client bir PUBLISHER.\n" );
+    }
+    else
+    {
+        printf( "[ClientHandler] UYARI: Bilinmeyen rol, baglanti kapatiliyor.\n" );
+        Net_Kapat( clientSocket );
+        vTaskDelete( NULL );
+    }
+}
+
+static void prvSehirSorguKomutunuIsle( const char *pcSehir )
+{
+    if( xSemaphoreTake( xSehirMutex, pdMS_TO_TICKS( 100 ) ) == pdTRUE )
+    {
+        strncpy( cSuankiSehir, pcSehir, sizeof( cSuankiSehir ) - 1 );
+        cSuankiSehir[ sizeof( cSuankiSehir ) - 1 ] = '\0';
+        xSemaphoreGive( xSehirMutex );
+    }
+
+    AnlikHavaSonucu_t sonuc = prvSehirAnlikSicaklikGetir( cSuankiSehir );
+
+    if( sonuc.basarili )
+    {
+        prvAnlikHavaYayinla( cSuankiSehir, &sonuc );
+
+        printf( "[ClientHandler] Anlik hava yayinlandi: %s = %.1f C\n",
+                cSuankiSehir, sonuc.sicaklik );
+
+        prvAnlikHavaKaydet( cSuankiSehir, &sonuc, prvSuankiUnixZaman() );
+
+        if( xAnlikHavaTaskHandle != NULL )
+        {
+            xTaskNotifyGive( xAnlikHavaTaskHandle );
+        }
+    }
+    else
+    {
+        printf( "[ClientHandler] HATA: '%s' icin anlik hava alinamadi.\n", cSuankiSehir );
+    }
+}
+
+static void prvNormalVeriYayinla( const char *pcMesajBuffer )
+{
+    xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
+    for( int i = 0; i < xSubscriberCount; i++ )
+    {
+        char gonderilecekMesaj[ 300 ];
+        snprintf( gonderilecekMesaj, sizeof( gonderilecekMesaj ), "%s\n", pcMesajBuffer );
+        Net_Gonder( xSubscriberSockets[ i ], gonderilecekMesaj, (int) strlen( gonderilecekMesaj ) );
+    }
+    xSemaphoreGive( xSubscriberListMutex );
+
+    printf( "[ClientHandler] Veri %d subscriber'a iletildi.\n", xSubscriberCount );
+}
+
+static void prvGelenMesajiIsle( bool bIsSubscriber, char *pcMesajBuffer )
+{
+    int mesajUzunlugu = (int) strlen( pcMesajBuffer );
+
+    if( mesajUzunlugu == 0 )
+    {
+        printf( "[ClientHandler] UYARI: Bos mesaj alindi, yok sayiliyor.\n" );
+        return;
+    }
+
+    if( mesajUzunlugu > 200 )
+    {
+        printf( "[ClientHandler] UYARI: Anormal uzunlukta mesaj (%d byte), "
+                "reddediliyor.\n", mesajUzunlugu );
+        return;
+    }
+
+    cJSON *parsedJson = cJSON_Parse( pcMesajBuffer );
+
+    if( parsedJson == NULL )
+    {
+        printf( "[ClientHandler] UYARI: Gecersiz JSON alindi, reddediliyor. "
+                "Gelen: %s\n", pcMesajBuffer );
+        return;
+    }
+
+    cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
+    cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
+
+    bool bGecerliMesaj = true;
+
+    if( topicItem == NULL || !cJSON_IsString( topicItem ) )
+    {
+        printf( "[ClientHandler] UYARI: 'topic' alani eksik veya hatali tipte.\n" );
+        bGecerliMesaj = false;
+    }
+
+    if( payloadItem == NULL || !cJSON_IsString( payloadItem ) )
+    {
+        printf( "[ClientHandler] UYARI: 'payload' alani eksik veya hatali tipte.\n" );
+        bGecerliMesaj = false;
+    }
+
+    if( bIsSubscriber && topicItem != NULL && cJSON_IsString( topicItem ) &&
+        strcmp( topicItem->valuestring, "cmd/sehir_sorgu" ) == 0 &&
+        payloadItem != NULL && cJSON_IsString( payloadItem ) )
+    {
+        printf( "[ClientHandler] Sehir sorgu komutu alindi: %s\n",
+                payloadItem->valuestring );
+        prvSehirSorguKomutunuIsle( payloadItem->valuestring );
+    }
+    else if( bIsSubscriber )
+    {
+        printf( "[ClientHandler] YETKI IHLALI: Subscriber veri gondermeye "
+                "calisti, veri reddediliyor. Gelen: %s\n", pcMesajBuffer );
+    }
+    else if( bGecerliMesaj )
+    {
+        printf( "[ClientHandler] Gecerli JSON alindi -> topic: %s, payload: %s\n",
+                topicItem->valuestring, payloadItem->valuestring );
+        prvNormalVeriYayinla( pcMesajBuffer );
+    }
+    else
+    {
+        printf( "[ClientHandler] Mesaj eksik/hatali alanlar icerdigi icin "
+                "subscriber'lara iletilmedi.\n" );
+    }
+
+    cJSON_Delete( parsedJson );
+}
+
+static void prvClientHandlerTemizle( NetSocket_t clientSocket, bool bIsSubscriber )
+{
     xAktifClientSayisi--;
     if( xAktifClientSayisi == 0 )
     {
-        /* Son client de ayrildi - idle sayaci SIMDI, bu andan itibaren
-        * baslasin. */
         xSonBaglantiZamani = xTaskGetTickCount();
     }
-    /* YENI: Eger bu bir subscriber idiyse, subscriber listesinden de
-    * CIKAR - aksi halde liste sadece buyur, hicbir zaman kucalmaz, bu da
-    * MAX_CLIENTS sinirina cabuk ulasilmasina yol acar (ozellikle
-    * test_komut.py gibi kisa omurlu subscriber baglantilari icin). */
+
     if( bIsSubscriber )
     {
         xSemaphoreTake( xSubscriberListMutex, portMAX_DELAY );
@@ -1723,10 +1733,6 @@ static void vClientHandlerTask( void *pvParameters )
         {
             if( xSubscriberSockets[ i ] == clientSocket )
             {
-                /* Bulunan elemani, listenin SONUNDAKI elemanla degistir -
-                * boylece array'de bosluk kalmiyor, sadece toplam sayi
-                * bir azaliyor. Sira onemli degil, sadece "kimin gecerli
-                * oldugu" onemli. */
                 xSubscriberSockets[ i ] = xSubscriberSockets[ xSubscriberCount - 1 ];
                 xSubscriberCount--;
                 printf( "[ClientHandler] Subscriber listeden cikarildi "
@@ -1737,13 +1743,9 @@ static void vClientHandlerTask( void *pvParameters )
         xSemaphoreGive( xSubscriberListMutex );
     }
 
-
-
     Net_Kapat( clientSocket );
     printf( "[ClientHandler] Task sonlandiriliyor.\n" );
-    vTaskDelete( NULL );
 }
-
 
 /* =======================================================================
  * vUdpCommandTask()
@@ -1987,7 +1989,7 @@ static void vMqttSubscriberTask( void *pvParameters )
         printf( "[MqttSub] Gelen veri bekleniyor...\n" );
         vTaskDelay( pdMS_TO_TICKS( 2000 ) );
     }
-    
+
 }
 
 
