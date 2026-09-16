@@ -22,6 +22,7 @@ set(DEMO_SOURCES
     main.c
     ntp.c
     weather.c
+    health.c
     net_port_windows.c
     cJSON/cJSON.c
 )
