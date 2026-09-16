@@ -56,8 +56,6 @@ typedef struct
 static QueueHandle_t xInternalCommQueue = NULL;
 static QueueHandle_t xPublishQueue = NULL;
 
-
-
 /* ---------------------------------------------------------------------
  * TASK ONCELIKLERI
  * ------------------------------------------------------------------- */
@@ -85,7 +83,6 @@ static QueueHandle_t xPublishQueue = NULL;
 #define NTP_SYNC_INTERVAL_MS    ( 5 * 60 * 1000 )   /* 5 dakikada bir yeniden senkronize et */
 
 #define STACK_SIZE_ANLIK_HAVA      ( configMINIMAL_STACK_SIZE * 8 )   /* WinHTTP icin biraz daha fazla stack */
-
 
 /* ---------------------------------------------------------------------
  * TASK HANDLE'LARI VE PROTOTIPLERI
@@ -151,6 +148,10 @@ static void prvSehirSorguKomutunuIsle( const char *pcSehir );
 static void prvNormalVeriYayinla( const char *pcMesajBuffer );
 static void prvGelenMesajiIsle( bool bIsSubscriber, char *pcMesajBuffer );
 static void prvClientHandlerTemizle( NetSocket_t clientSocket, bool bIsSubscriber );
+static void prvBrokerDinlemeDongusu( void );
+static void prvClientKimlikGonder( NetSocket_t clientSocket, SystemRole_t xRole );
+static void prvPublisherAkisi( NetSocket_t clientSocket );
+static void prvSubscriberAkisi( NetSocket_t clientSocket );
 
 
 int main( int argc, char *argv[] )
@@ -172,8 +173,6 @@ int main( int argc, char *argv[] )
     {
         return EXIT_FAILURE;
     }
-
-    
     
     /* 1) ADIM: Rolu belirle - HENUZ FreeRTOS scheduler baslamadi,
      *    normal C kodu olarak calisiyoruz. */
@@ -214,8 +213,6 @@ int main( int argc, char *argv[] )
         printf( "HATA: Sehir mutex'i olusturulamadi!\n" );
         return EXIT_FAILURE;
     }
-
-
 
     /* Network -> Internal Comm arasi veri tasimak icin queue.
     * 10 eleman kapasiteli - ayni anda en fazla 10 mesaj biriktirebilir. */
@@ -311,7 +308,6 @@ int main( int argc, char *argv[] )
     }
 }
 
-
 /* =======================================================================
  * prvSehirConfigYukle()
  *
@@ -392,9 +388,6 @@ static void prvSicaklikVerisiYukle( const char *pcDosyaYolu )
     printf( "[main] Gercek sicaklik veri seti yuklendi: %d kayit (%s).\n",
             xSicaklikKayitSayisi, pcDosyaYolu );
 }
-
-
-
 
 /*-----------------------------------------------------------*/
 /* =======================================================================
@@ -602,261 +595,243 @@ static void vNetworkTask( void *pvParameters )
 
     if( xRole == ROLE_BROKER )
     {
-        printf( "[Network] BROKER modu: baglanti dinlemeye hazirlaniliyor...\n" );
+        prvBrokerDinlemeDongusu();
+        return;   /* prvBrokerDinlemeDongusu zaten sonsuz dongu, buraya hic gelinmez */
+    }
 
-        /* Soket olusturma, bind, listen ve non-blocking ayari - TUMU
-        * Net_DinlemeBaslat() icinde, platformdan bagimsiz sekilde yapiliyor. */
-        NetSocket_t listenSocket = Net_DinlemeBaslat( xPortNumarasi );
+    NetSocket_t clientSocket = NET_INVALID_SOCKET;
 
-        if( listenSocket == NET_INVALID_SOCKET )
+    printf( "[Network] CLIENT modu: broker'a baglanmaya hazirlaniliyor...\n" );
+
+    while( clientSocket == NET_INVALID_SOCKET )
+    {
+        clientSocket = Net_Baglan( cBrokerIP, xPortNumarasi );
+
+        if( clientSocket == NET_INVALID_SOCKET )
         {
-            printf( "[Network] HATA: dinleme baslatilamadi.\n" );
-            vTaskDelete( NULL );
+            printf( "[Network] Broker'a baglanilamadi, 2 saniye sonra tekrar denenecek...\n" );
+            vTaskDelay( pdMS_TO_TICKS( 2000 ) );
         }
+    }
 
-        printf( "[Network] Broker port %d'de dinlemede...\n", xPortNumarasi );
+    prvClientKimlikGonder( clientSocket, xRole );
 
-        NetSocket_t clientSocket = NET_INVALID_SOCKET;
-
-        /* BROKER'a ozel sonsuz dongu - accept() burada, if bloğunun İÇİNDE */
-        for( ;; )
-        {
-            clientSocket = Net_BaglantiKabulEt( listenSocket );;
-
-            if( clientSocket != NET_INVALID_SOCKET  )
-            {       
-                    xSonBaglantiZamani = xTaskGetTickCount();  /* idle-timeout sayacini sifirla */
-                    printf( "[Network] Yeni bir client baglandi! Kendi task'i olusturuluyor...\n" );
-
-                    TaskHandle_t xClientHandle = NULL;
-                    BaseType_t xResult = xTaskCreate( vClientHandlerTask,
-                                        "ClientHandler",
-                                        STACK_SIZE_CLIENT_HANDLER,
-                                        (void *)(uintptr_t) clientSocket,
-                                        PRIORITY_CLIENT_HANDLER,
-                                        &xClientHandle );
-
-                if( xResult != pdPASS )
-                {
-                    printf( "[Network] HATA: Client task'i olusturulamadi, baglanti reddediliyor.\n" );
-                    Net_Kapat( clientSocket );
-                }
-
-                clientSocket = NET_INVALID_SOCKET ;
-}
-            else
-            {
-                /* Bekleyen baglanti yok, normal durum. */
-            }
-
-            vTaskDelay( pdMS_TO_TICKS( 100 ) );
-        }
+    if( xRole == ROLE_PUBLISHER )
+    {
+        prvPublisherAkisi( clientSocket );
     }
     else
     {
-        printf( "[Network] CLIENT modu: broker'a baglanmaya hazirlaniliyor...\n" );
+        prvSubscriberAkisi( clientSocket );
+    }
+}
 
-        /* Baglanana kadar tekrar dene - soket olusturma, adres cozumleme ve
-        * connect adimlarinin TAMAMI Net_Baglan() icinde, platformdan
-        * bagimsiz sekilde yapiliyor. */
-        NetSocket_t clientSocket = NET_INVALID_SOCKET;
+static void prvBrokerDinlemeDongusu( void )
+{
+    printf( "[Network] BROKER modu: baglanti dinlemeye hazirlaniliyor...\n" );
 
-        while( clientSocket == NET_INVALID_SOCKET )
+    NetSocket_t listenSocket = Net_DinlemeBaslat( xPortNumarasi );
+
+    if( listenSocket == NET_INVALID_SOCKET )
+    {
+        printf( "[Network] HATA: dinleme baslatilamadi.\n" );
+        vTaskDelete( NULL );
+    }
+
+    printf( "[Network] Broker port %d'de dinlemede...\n", xPortNumarasi );
+
+    NetSocket_t clientSocket = NET_INVALID_SOCKET;
+
+    for( ;; )
+    {
+        clientSocket = Net_BaglantiKabulEt( listenSocket );
+
+        if( clientSocket != NET_INVALID_SOCKET )
         {
-            clientSocket = Net_Baglan( cBrokerIP, xPortNumarasi );
+            xSonBaglantiZamani = xTaskGetTickCount();
+            printf( "[Network] Yeni bir client baglandi! Kendi task'i olusturuluyor...\n" );
 
-            if( clientSocket == NET_INVALID_SOCKET )
+            TaskHandle_t xClientHandle = NULL;
+            BaseType_t xResult = xTaskCreate( vClientHandlerTask,
+                                "ClientHandler",
+                                STACK_SIZE_CLIENT_HANDLER,
+                                (void *)(uintptr_t) clientSocket,
+                                PRIORITY_CLIENT_HANDLER,
+                                &xClientHandle );
+
+            if( xResult != pdPASS )
             {
-                printf( "[Network] Broker'a baglanilamadi, 2 saniye sonra tekrar denenecek...\n" );
-                vTaskDelay( pdMS_TO_TICKS( 2000 ) );
+                printf( "[Network] HATA: Client task'i olusturulamadi, baglanti reddediliyor.\n" );
+                Net_Kapat( clientSocket );
             }
+
+            clientSocket = NET_INVALID_SOCKET;
         }
 
-            
+        vTaskDelay( pdMS_TO_TICKS( 100 ) );
+    }
+}
 
-            /* Test amacli: periyodik olarak basit bir mesaj gonder.
-            * Boylece TCP baglantisi uzerinden GERCEKTEN veri aktigini
-            * gozlemleyebilecegiz. Faz 4'te bu, gercek JSON verisiyle
-            * degistirilecek. */
-           
-            printf( "[Network] Broker'a basariyla baglanildi!\n" );
+static void prvClientKimlikGonder( NetSocket_t clientSocket, SystemRole_t xRole )
+{
+    printf( "[Network] Broker'a basariyla baglanildi!\n" );
 
-            /* Kendimizi broker'a tanitiyoruz - ilk mesaj olarak rol bilgimizi
-            * gonderiyoruz. Broker bu mesaji okuyup bizi subscriber listesine
-            * ekleyip eklemeyecegine karar verecek. */
-            char kimlikMesaji[ 128 ];
-            const char *rolString = ( xRole == ROLE_PUBLISHER ) ? "PUBLISHER" : "SUBSCRIBER";
-            snprintf( kimlikMesaji, sizeof( kimlikMesaji ), "AUTH:%s|ROLE:%s\n", SHARED_AUTH_TOKEN, rolString );
+    char kimlikMesaji[ 128 ];
+    const char *rolString = ( xRole == ROLE_PUBLISHER ) ? "PUBLISHER" : "SUBSCRIBER";
+    snprintf( kimlikMesaji, sizeof( kimlikMesaji ), "AUTH:%s|ROLE:%s\n", SHARED_AUTH_TOKEN, rolString );
 
-            Net_Gonder( clientSocket, kimlikMesaji, (int) strlen( kimlikMesaji ));
-            printf( "[Network] Kimlik bildirildi: %s\n", kimlikMesaji );
+    Net_Gonder( clientSocket, kimlikMesaji, (int) strlen( kimlikMesaji ) );
+    printf( "[Network] Kimlik bildirildi: %s\n", kimlikMesaji );
+}
 
+static void prvPublisherAkisi( NetSocket_t clientSocket )
+{
+    PublishData_t gelenVeri;
 
-        if( xRole == ROLE_PUBLISHER )
+    for( ;; )
+    {
+        if( xQueueReceive( xPublishQueue, &gelenVeri, portMAX_DELAY ) == pdPASS )
         {
-            /* Artik veri URETMIYORUZ - MQTT Publisher Task'in queue'ya
-            * koydugu veriyi BEKLIYORUZ (portMAX_DELAY sayesinde veri
-            * gelene kadar CPU'yu kullanmadan Blocked durumda kaliyoruz). */
-            PublishData_t gelenVeri;
+            cJSON *root = cJSON_CreateObject();
+            cJSON_AddStringToObject( root, "topic", gelenVeri.topic );
+            cJSON_AddStringToObject( root, "payload", gelenVeri.payload );
+            cJSON_AddNumberToObject( root, "mesaj_no", gelenVeri.mesaj_no );
+            cJSON_AddStringToObject( root, "sehir", gelenVeri.sehir );
+            cJSON_AddStringToObject( root, "tarih", gelenVeri.tarih );
+            cJSON_AddStringToObject( root, "durum", gelenVeri.durum );
+            cJSON_AddNumberToObject( root, "zaman", (double) Ntp_SuankiZaman() );
 
-            for( ;; )
+            char *jsonString = cJSON_PrintUnformatted( root );
+
+            char gonderilecekVeri[ 256 ];
+            snprintf( gonderilecekVeri, sizeof( gonderilecekVeri ), "%s\n", jsonString );
+
+            Net_Gonder( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ) );
+            printf( "[Network] JSON mesaj gonderildi: %s\n", jsonString );
+
+            cJSON_free( jsonString );
+            cJSON_Delete( root );
+        }
+    }
+}
+
+static void prvSubscriberAkisi( NetSocket_t clientSocket )
+{
+    Net_NonBlockingYap( clientSocket );
+
+    char recvBuffer[ 256 ];
+    char mesajBuffer[ 1024 ] = { 0 };
+    int mesajBufferUzunluk = 0;
+
+    for( ;; )
+    {
+        int bytesReceived = Net_Al( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1 );
+
+        if( bytesReceived > 0 )
+        {
+            recvBuffer[ bytesReceived ] = '\0';
+
+            if( mesajBufferUzunluk + bytesReceived < (int) sizeof( mesajBuffer ) - 1 )
             {
-                if( xQueueReceive( xPublishQueue, &gelenVeri, portMAX_DELAY ) == pdPASS )
+                memcpy( mesajBuffer + mesajBufferUzunluk, recvBuffer, bytesReceived );
+                mesajBufferUzunluk += bytesReceived;
+                mesajBuffer[ mesajBufferUzunluk ] = '\0';
+            }
+
+            char *newlinePos;
+            while( ( newlinePos = strchr( mesajBuffer, '\n' ) ) != NULL )
+            {
+                *newlinePos = '\0';
+
+                cJSON *parsedJson = cJSON_Parse( mesajBuffer );
+
+                if( parsedJson == NULL )
                 {
-                    /* --- JSON nesnesi olustur --- */
-                    cJSON *root = cJSON_CreateObject();
-                    cJSON_AddStringToObject( root, "topic", gelenVeri.topic );
-                    cJSON_AddStringToObject( root, "payload", gelenVeri.payload );
-                    cJSON_AddNumberToObject( root, "mesaj_no", gelenVeri.mesaj_no );
-                    cJSON_AddStringToObject( root, "sehir", gelenVeri.sehir );
-                    cJSON_AddStringToObject( root, "tarih", gelenVeri.tarih );
-                    cJSON_AddStringToObject( root, "durum", gelenVeri.durum );
-                    cJSON_AddNumberToObject( root, "zaman", (double) Ntp_SuankiZaman() );
-
-                    char *jsonString = cJSON_PrintUnformatted( root );
-
-                    char gonderilecekVeri[ 256 ];
-                    snprintf( gonderilecekVeri, sizeof( gonderilecekVeri ), "%s\n", jsonString );
-
-                    Net_Gonder( clientSocket, gonderilecekVeri, (int) strlen( gonderilecekVeri ));
-                    printf( "[Network] JSON mesaj gonderildi: %s\n", jsonString );
-
-                    cJSON_free( jsonString );
-                    cJSON_Delete( root );
+                    printf( "[Network] UYARI: Gecersiz JSON alindi, yok sayiliyor. "
+                            "Gelen: %s\n", mesajBuffer );
                 }
-            }
-        }
-        else
-        {
-            
-            Net_NonBlockingYap( clientSocket );
-
-            char recvBuffer[ 256 ];
-            char mesajBuffer[ 1024 ] = { 0 };  /* framing icin biriktirme buffer'i */
-            int mesajBufferUzunluk = 0;
-
-            for( ;; )
-            {
-                int bytesReceived = Net_Al( clientSocket, recvBuffer, sizeof( recvBuffer ) - 1 );
-                if( bytesReceived > 0 )
+                else
                 {
-                    recvBuffer[ bytesReceived ] = '\0';
+                    cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
+                    cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
 
-                    /* Gelen veriyi kalici buffer'a ekle (broker tarafiyla ayni mantik) */
-                    if( mesajBufferUzunluk + bytesReceived < (int) sizeof( mesajBuffer ) - 1 )
+                    bool bPayloadGecerli = ( payloadItem != NULL ) &&
+                        ( cJSON_IsString( payloadItem ) || cJSON_IsObject( payloadItem ) );
+
+                    if( topicItem != NULL && cJSON_IsString( topicItem ) && bPayloadGecerli )
                     {
-                        memcpy( mesajBuffer + mesajBufferUzunluk, recvBuffer, bytesReceived );
-                        mesajBufferUzunluk += bytesReceived;
-                        mesajBuffer[ mesajBufferUzunluk ] = '\0';
-                    }
+                        char payloadMetni[ 128 ];
 
-                    /* Buffer icinde tam mesaj(lar) var mi diye kontrol et */
-                    char *newlinePos;
-                    while( ( newlinePos = strchr( mesajBuffer, '\n' ) ) != NULL )
-                    {
-                        *newlinePos = '\0';
-
-                        /* --- JSON DOGRULAMASI (broker ile ayni mantik) --- */
-                        cJSON *parsedJson = cJSON_Parse( mesajBuffer );
-
-                        if( parsedJson == NULL )
+                        if( cJSON_IsObject( payloadItem ) )
                         {
-                            printf( "[Network] UYARI: Gecersiz JSON alindi, yok sayiliyor. "
-                                    "Gelen: %s\n", mesajBuffer );
+                            char *tempStr = cJSON_PrintUnformatted( payloadItem );
+                            strncpy( payloadMetni, tempStr, sizeof( payloadMetni ) - 1 );
+                            payloadMetni[ sizeof( payloadMetni ) - 1 ] = '\0';
+                            cJSON_free( tempStr );
                         }
                         else
                         {
-                            cJSON *topicItem   = cJSON_GetObjectItem( parsedJson, "topic" );
-                            cJSON *payloadItem = cJSON_GetObjectItem( parsedJson, "payload" );
-
-                            bool bPayloadGecerli = ( payloadItem != NULL ) &&
-                        ( cJSON_IsString( payloadItem ) || cJSON_IsObject( payloadItem ) );
-
-                            if( topicItem != NULL && cJSON_IsString( topicItem ) && bPayloadGecerli )
-                            {
-                                char payloadMetni[ 128 ];
-
-                                if( cJSON_IsObject( payloadItem ) )
-                                {
-                                    /* system/health gibi nested JSON payload'lar icin - objeyi
-                                    * tekrar kompakt bir string'e ceviriyoruz, boylece mevcut
-                                    * SensorData_t (sabit boyutlu char[] tutan) yapisiyla uyumlu
-                                    * kaliyoruz. */
-                                    char *tempStr = cJSON_PrintUnformatted( payloadItem );
-                                    strncpy( payloadMetni, tempStr, sizeof( payloadMetni ) - 1 );
-                                    payloadMetni[ sizeof( payloadMetni ) - 1 ] = '\0';
-                                    cJSON_free( tempStr );
-                                }
-                                else
-                                {
-                                    strncpy( payloadMetni, payloadItem->valuestring, sizeof( payloadMetni ) - 1 );
-                                    payloadMetni[ sizeof( payloadMetni ) - 1 ] = '\0';
-                                }
-
-                                /* --- CROSS-INSTANCE HEALTH PERFORMANS OLCUMU (guncellendi) ---
-                                * Artik ts alanini strstr ile string icinde ARAMIYORUZ - ts,
-                                * nested obje icinde GERCEK bir sayisal alan, dogrudan okuyoruz. */
-                                if( strcmp( topicItem->valuestring, "system/health" ) == 0 &&
-                                    cJSON_IsObject( payloadItem ) )
-                                {
-                                    cJSON *tsItem = cJSON_GetObjectItem( payloadItem, "ts" );
-
-                                    if( tsItem != NULL && cJSON_IsNumber( tsItem ) )
-                                    {
-                                        unsigned long long uzakZaman = (unsigned long long) tsItem->valuedouble;
-                                        unsigned long long yerelZaman = (unsigned long long) Net_SistemZamaniMs();
-                                        long long gecikmeMs = (long long) ( yerelZaman - uzakZaman );
-
-                                        printf( "[HealthPeer] Uzak instance'in health verisi %lld ms'de ulasti.\n",
-                                                gecikmeMs );
-                                    }
-                                }
-
-                                SensorData_t veri;
-                                strncpy( veri.topic, topicItem->valuestring, sizeof( veri.topic ) - 1 );
-                                veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
-                                strncpy( veri.payload, payloadMetni, sizeof( veri.payload ) - 1 );
-                                veri.payload[ sizeof( veri.payload ) - 1 ] = '\0';
-
-                                if( xQueueSend( xInternalCommQueue, &veri, portMAX_DELAY ) != pdPASS )
-                                {
-                                    printf( "[Network] UYARI: Veri Internal Comm queue'suna gonderilemedi.\n" );
-                                }
-                            }
-                            else
-                            {
-                                printf( "[Network] UYARI: JSON gecerli ama gerekli alanlar eksik.\n" );
-                            }
-
-                            cJSON_Delete( parsedJson );
+                            strncpy( payloadMetni, payloadItem->valuestring, sizeof( payloadMetni ) - 1 );
+                            payloadMetni[ sizeof( payloadMetni ) - 1 ] = '\0';
                         }
 
-                        /* Islenen mesaji buffer'dan cikar, kalani basa kaydir */
-                        int islenenUzunluk = (int)( newlinePos - mesajBuffer ) + 1;
-                        int kalanUzunluk = mesajBufferUzunluk - islenenUzunluk;
+                        if( strcmp( topicItem->valuestring, "system/health" ) == 0 &&
+                            cJSON_IsObject( payloadItem ) )
+                        {
+                            cJSON *tsItem = cJSON_GetObjectItem( payloadItem, "ts" );
 
-                        memmove( mesajBuffer, newlinePos + 1, kalanUzunluk );
-                        mesajBufferUzunluk = kalanUzunluk;
-                        mesajBuffer[ mesajBufferUzunluk ] = '\0';
-                    }
-                }
-                else if( bytesReceived == NET_SONUC_BAGLANTI_KAPANDI )
-                {
-                    printf( "[Network] Broker baglantiyi kapatti.\n" );
-                    break;
-                }
-                else if( bytesReceived == NET_SONUC_HATA )
-                {
-                    printf( "[Network] HATA: veri alinamadi.\n" );
-                    break;
-                }
+                            if( tsItem != NULL && cJSON_IsNumber( tsItem ) )
+                            {
+                                unsigned long long uzakZaman = (unsigned long long) tsItem->valuedouble;
+                                unsigned long long yerelZaman = (unsigned long long) Net_SistemZamaniMs();
+                                long long gecikmeMs = (long long) ( yerelZaman - uzakZaman );
 
-                                vTaskDelay( pdMS_TO_TICKS( 100 ) );
+                                printf( "[HealthPeer] Uzak instance'in health verisi %lld ms'de ulasti.\n",
+                                        gecikmeMs );
                             }
                         }
+
+                        SensorData_t veri;
+                        strncpy( veri.topic, topicItem->valuestring, sizeof( veri.topic ) - 1 );
+                        veri.topic[ sizeof( veri.topic ) - 1 ] = '\0';
+                        strncpy( veri.payload, payloadMetni, sizeof( veri.payload ) - 1 );
+                        veri.payload[ sizeof( veri.payload ) - 1 ] = '\0';
+
+                        if( xQueueSend( xInternalCommQueue, &veri, portMAX_DELAY ) != pdPASS )
+                        {
+                            printf( "[Network] UYARI: Veri Internal Comm queue'suna gonderilemedi.\n" );
+                        }
                     }
+                    else
+                    {
+                        printf( "[Network] UYARI: JSON gecerli ama gerekli alanlar eksik.\n" );
+                    }
+
+                    cJSON_Delete( parsedJson );
                 }
 
+                int islenenUzunluk = (int)( newlinePos - mesajBuffer ) + 1;
+                int kalanUzunluk = mesajBufferUzunluk - islenenUzunluk;
+
+                memmove( mesajBuffer, newlinePos + 1, kalanUzunluk );
+                mesajBufferUzunluk = kalanUzunluk;
+                mesajBuffer[ mesajBufferUzunluk ] = '\0';
+            }
+        }
+        else if( bytesReceived == NET_SONUC_BAGLANTI_KAPANDI )
+        {
+            printf( "[Network] Broker baglantiyi kapatti.\n" );
+            break;
+        }
+        else if( bytesReceived == NET_SONUC_HATA )
+        {
+            printf( "[Network] HATA: veri alinamadi.\n" );
+            break;
+        }
+
+        vTaskDelay( pdMS_TO_TICKS( 100 ) );
+    }
+}
 static void vClientHandlerTask( void *pvParameters )
 {
     NetSocket_t clientSocket = (NetSocket_t)(uintptr_t) pvParameters;
@@ -1214,8 +1189,6 @@ static void vUdpCommandTask( void *pvParameters )
         vTaskDelay( pdMS_TO_TICKS( 100 ) );
     }
 }
-
-
 
 /* =======================================================================
  * vStatusBroadcastCallback()
